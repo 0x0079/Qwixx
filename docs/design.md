@@ -18,6 +18,9 @@ src/
   ui/            Vite + React 网页界面（本地热座：人类与 AI 任意混合）
 tests/           引擎与规则边界用例（vitest）
 docs/
+  manual.md          玩家手册（各变体完整规则与界面操作）
+  api.md             开发者 API 参考
+  training.md        AI 训练指南
   rules-research.md  各版本规则调研报告（含官方来源链接）
 ```
 
