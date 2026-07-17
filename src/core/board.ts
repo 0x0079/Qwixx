@@ -85,26 +85,75 @@ export function randomMixedBoard(seed: number): BoardDef {
   return { id: `random-${seed}`, name: `随机混排 #${seed}`, rows, scoreBy: 'row' };
 }
 
+const LONGO_ASC = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
+const LONGO_DESC = [...LONGO_ASC].reverse();
+
+/**
+ * Qwixx Longo（NSV 2021，官方规则 QwixxLongo_GB.pdf）：
+ * 八面骰（1..8）；四行 2→16 / 16→2 共 15 格；行尾最后两个数字任一可锁行，
+ * 锁行门槛提高为已划 ≥6；每名玩家有 2 个幸运数字——白骰和等于幸运数字时，
+ * 可改划"当前划记最少的行"的下一个可划格。计分表延续三角数（15x = 120）。
+ */
+export const LONGO_BOARD: BoardDef = {
+  id: 'longo',
+  name: 'Qwixx Longo（2–16 · 八面骰 · 幸运数字）',
+  rows: [row('red', LONGO_ASC), row('yellow', LONGO_ASC), row('green', LONGO_DESC), row('blue', LONGO_DESC)],
+  scoreBy: 'row',
+  lockableTail: 2,
+  luckyNumbers: true,
+  rulesOverrides: { dieFaces: 8, minMarksToLock: 6 },
+};
+
+/**
+ * Qwixx Big Points（NSV，官方规则 QwixxBP_GB.pdf）：
+ * 经典四行之外，红/黄行之间与绿/蓝行之间各有一条圆形奖励行（数字与相邻列相同）。
+ * 已划过某个相邻普通格后，再次掷出同样的数（对应彩骰组合或白骰和）即可划奖励格；
+ * 奖励格计入相邻两行的划记数（每行最多计 15 个），不参与锁行门槛，只划奖励格不算失误。
+ */
+export const BIG_POINTS_BOARD: BoardDef = {
+  id: 'big-points',
+  name: 'Qwixx Big Points（双色奖励行）',
+  rows: [row('red', ASC), row('yellow', ASC), row('green', DESC), row('blue', DESC)],
+  scoreBy: 'row',
+  scoreCap: 15,
+  bonusRows: [
+    { adjacent: [0, 1], numbers: [...ASC] },
+    { adjacent: [2, 3], numbers: [...DESC] },
+  ],
+};
+
 export const BOARD_PRESETS: Record<string, BoardDef> = {
   classic: CLASSIC_BOARD,
   'gemixxt-a': GEMIXXT_A_BOARD,
   'gemixxt-b': GEMIXXT_B_BOARD,
+  longo: LONGO_BOARD,
+  'big-points': BIG_POINTS_BOARD,
 };
 
-/** 校验棋盘定义的基本合法性（行数、格数、颜色计数）。 */
+/** 校验棋盘定义的基本合法性（行数、格数、数字范围、奖励行、颜色计数）。 */
 export function validateBoard(board: BoardDef): void {
   if (board.rows.length !== 4) throw new Error('board must have 4 rows');
+  const len = board.rows[0]!.cells.length;
   for (const r of board.rows) {
-    if (r.cells.length !== 11) throw new Error('each row must have 11 cells');
+    if (r.cells.length !== len) throw new Error('all rows must have the same length');
+    if (r.cells.length < 2) throw new Error('rows too short');
     for (const c of r.cells) {
-      if (c.number < 2 || c.number > 12) throw new Error('cell numbers must be 2..12');
+      if (c.number < 2 || c.number > 16) throw new Error('cell numbers must be 2..16');
+    }
+  }
+  const tail = board.lockableTail ?? 1;
+  if (tail < 1 || tail >= len) throw new Error('invalid lockableTail');
+  for (const b of board.bonusRows ?? []) {
+    if (b.numbers.length !== len) throw new Error('bonus row must match row length');
+    for (const adj of b.adjacent) {
+      if (adj < 0 || adj >= board.rows.length) throw new Error('invalid bonus adjacency');
     }
   }
   if (board.scoreBy === 'color') {
     const counts = new Map<Color, number>();
     for (const r of board.rows) for (const c of r.cells) counts.set(c.color, (counts.get(c.color) ?? 0) + 1);
     for (const c of COLORS) {
-      if (counts.get(c) !== 11) throw new Error(`color ${c} must appear exactly 11 times`);
+      if (counts.get(c) !== len) throw new Error(`color ${c} must appear exactly ${len} times`);
     }
   }
 }

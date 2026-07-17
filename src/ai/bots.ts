@@ -1,5 +1,6 @@
 import type { Action, GameState } from '../core/types';
-import { legalActions, whiteSum } from '../core/engine';
+import { legalActions, rightmostMark } from '../core/engine';
+import { effectiveRowCount } from '../core/scoring';
 import { nextRand } from '../core/rng';
 
 /**
@@ -21,39 +22,59 @@ export function makeRand(seed: number): () => number {
   };
 }
 
-/** 玩家在某行当前最右划记的位置（无则 -1）。 */
-function rightmost(state: GameState, player: number, row: number): number {
-  const marks = state.players[player]!.marks[row]!;
-  for (let i = marks.length - 1; i >= 0; i--) if (marks[i]) return i;
-  return -1;
+type MarkAction = Exclude<Action, { type: 'skipWhite' } | { type: 'skipColor' }>;
+
+/** 玩家某计分组当前的边际计数（scoreBy='color' 时按颜色统计）。 */
+function groupCount(state: GameState, player: number, row: number, cell: number): number {
+  const { board } = state.config;
+  if (board.scoreBy === 'row') return effectiveRowCount(state, player, row);
+  const color = board.rows[row]!.cells[cell]!.color;
+  let count = 0;
+  board.rows.forEach((rd, r) =>
+    rd.cells.forEach((c, i) => {
+      if (c.color === color && state.players[player]!.marks[r]![i]) count++;
+    }),
+  );
+  return count;
 }
 
-/** 划记动作的启发式评估要素。 */
+/** 划记动作的启发式评估要素：边际得分、跳格数、是否锁行。 */
 function evaluateMark(
   state: GameState,
   player: number,
-  action: Extract<Action, { type: 'markWhite' | 'markColor' }>,
+  action: MarkAction,
 ): { gain: number; skipped: number; locks: boolean } {
   const { board } = state.config;
-  const rowDef = board.rows[action.row]!;
-  const cell = rowDef.cells[action.cell]!;
-  const skipped = action.cell - rightmost(state, player, action.row) - 1;
 
-  // 当前计分组内已划数量（决定边际得分 n+1）。
-  let count = 0;
-  if (board.scoreBy === 'row') {
-    count = state.players[player]!.marks[action.row]!.filter(Boolean).length;
-  } else {
-    board.rows.forEach((rd, r) =>
-      rd.cells.forEach((c, i) => {
-        if (c.color === cell.color && state.players[player]!.marks[r]![i]) count++;
-      }),
-    );
+  if (action.type === 'markBonusWhite' || action.type === 'markBonusColor') {
+    // 奖励格：计入相邻两行，各行边际 +1。
+    const bonusDef = board.bonusRows![action.bonus]!;
+    const bm = state.players[player]!.bonusMarks[action.bonus]!;
+    let rightmost = -1;
+    for (let i = bm.length - 1; i >= 0; i--) if (bm[i]) { rightmost = i; break; }
+    const skipped = action.cell - rightmost - 1;
+    let gain = 0;
+    const cap = board.scoreCap ?? Infinity;
+    for (const adj of bonusDef.adjacent) {
+      const n = effectiveRowCount(state, player, adj);
+      if (n < cap) gain += n + 1;
+    }
+    return { gain, skipped, locks: false };
   }
-  const isLock = action.cell === rowDef.cells.length - 1;
+
+  const row = action.row;
+  const cell = action.type === 'markLucky' ? rightmostMark(state, player, row) + 1 : action.cell;
+  const skipped = action.type === 'markLucky' ? 0 : cell - rightmostMark(state, player, row) - 1;
+  const count = groupCount(state, player, row, cell);
+  const tail = board.lockableTail ?? 1;
+  const isLock = cell >= board.rows[row]!.cells.length - tail;
   // 边际得分：第 n+1 个划记价值 n+1 分；锁定格额外再 +1 个计数（再 +n+2 分）。
   const gain = count + 1 + (isLock ? count + 2 : 0);
   return { gain, skipped, locks: isLock };
+}
+
+function isSkip(a: Action): boolean {
+  return a.type === 'skipWhite' || a.type === 'skipColor';
 }
 
 /** 随机机器人：在合法动作中等概率选择。 */
@@ -65,7 +86,7 @@ export class RandomBot implements Bot {
   }
 }
 
-/** 贪心机器人：只要不跳格（skipped<=1 且非主动过多）就划边际得分最高的格。 */
+/** 贪心机器人：只要不跳格太多（skipped<=1）就划边际得分最高的格。 */
 export class GreedyBot implements Bot {
   readonly name = 'greedy';
   constructor(private maxSkip = 1) {}
@@ -74,8 +95,8 @@ export class GreedyBot implements Bot {
     let best: Action | undefined;
     let bestVal = -Infinity;
     for (const a of legal) {
-      if (a.type === 'skipWhite' || a.type === 'skipColor') continue;
-      const e = evaluateMark(state, playerId, a);
+      if (isSkip(a)) continue;
+      const e = evaluateMark(state, playerId, a as MarkAction);
       if (e.skipped > this.maxSkip) continue;
       const val = e.gain - 2 * e.skipped;
       if (val > bestVal) {
@@ -89,8 +110,8 @@ export class GreedyBot implements Bot {
       let fallback: Action | undefined;
       let fbVal = -Infinity;
       for (const a of legal) {
-        if (a.type !== 'markColor') continue;
-        const e = evaluateMark(state, playerId, a);
+        if (isSkip(a)) continue;
+        const e = evaluateMark(state, playerId, a as MarkAction);
         const val = e.gain - 2 * e.skipped;
         if (val > fbVal) {
           fbVal = val;
@@ -105,8 +126,8 @@ export class GreedyBot implements Bot {
 
 /**
  * 启发式机器人：
- * - 价值 = 边际得分 - w_skip * 跳格数，随游戏进程放宽跳格容忍度；
- * - 白骰阶段主动玩家会考虑彩骰阶段仍有机会，阈值略高；
+ * - 价值 = 边际得分 + 划记建设价值 - 跳格代价（随进度放宽）+ 锁行奖励；
+ * - 硬性跳格上限（随进度放宽），锁行或被迫划记时豁免；
  * - 主动玩家避免失误：只要有代价低于 5 分的划法就不吃失误。
  */
 export class HeuristicBot implements Bot {
@@ -119,10 +140,11 @@ export class HeuristicBot implements Bot {
 
   private progress(state: GameState): number {
     // 0~1 的粗略进度：锁定行数、最大失误数、各玩家划记总量。
+    const cells = state.config.board.rows[0]!.cells.length * 4;
     const locks = state.lockedRows.filter(Boolean).length / state.config.locksToEnd;
     const pen = Math.max(...state.players.map((p) => p.penalties)) / state.config.maxPenalties;
     const marks =
-      Math.max(...state.players.map((p) => p.marks.flat().filter(Boolean).length)) / 30;
+      Math.max(...state.players.map((p) => p.marks.flat().filter(Boolean).length)) / (cells * 0.68);
     return Math.min(1, Math.max(locks, pen, marks));
   }
 
@@ -137,8 +159,8 @@ export class HeuristicBot implements Bot {
     let best: Action | undefined;
     let bestVal = -Infinity;
     for (const a of legal) {
-      if (a.type === 'skipWhite' || a.type === 'skipColor') continue;
-      const e = evaluateMark(state, playerId, a);
+      if (isSkip(a)) continue;
+      const e = evaluateMark(state, playerId, a as MarkAction);
       if (e.skipped > maxSkip && !e.locks && !mustMark) continue; // 硬性跳格上限
       let val = e.gain + this.markBonus - tolerance * e.skipped;
       if (e.locks) val += 3; // 锁行既加分也压缩对手空间
@@ -151,10 +173,9 @@ export class HeuristicBot implements Bot {
     // 通过阈值：非主动玩家跳过无代价，主动玩家白骰阶段还有彩骰机会。
     let threshold = 0;
     if (isActive && state.phase === 'whiteChoice') {
-      // 若白骰不划，彩骰阶段没划成则 -5；这里保守一点，稍降门槛。
       threshold = -0.5;
     }
-    if (isActive && state.phase === 'colorChoice' && !state.activeMarked) {
+    if (mustMark) {
       threshold = -(state.config.penaltyPoints - 0.5); // 几乎任何划法都好过失误
     }
 

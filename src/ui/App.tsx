@@ -6,7 +6,8 @@ import {
   legalActions,
   applyAction,
   whiteSum,
-  DEFAULT_RULES,
+  rightmostMark,
+  configForBoard,
 } from '../core/engine';
 import { BOARD_PRESETS, randomMixedBoard } from '../core/board';
 import { computeScore } from '../core/scoring';
@@ -59,7 +60,7 @@ export function App() {
         ? randomMixedBoard(setup.seed)
         : BOARD_PRESETS[setup.boardId]!;
       setLog([]);
-      setGame(newGame({ ...DEFAULT_RULES, board, numPlayers: setup.players.length, seed: setup.seed }));
+      setGame(newGame(configForBoard(board, setup.players.length, setup.seed)));
     }} />;
   }
   return (
@@ -122,6 +123,8 @@ function SetupScreen({ setup, setSetup, onStart }: {
           <option value="classic">经典 Qwixx</option>
           <option value="gemixxt-a">gemixxt 变体 A（混色·数字有序）</option>
           <option value="gemixxt-b">gemixxt 变体 B（单色·数字乱序）</option>
+          <option value="longo">Qwixx Longo（2–16 · 八面骰 · 幸运数字）</option>
+          <option value="big-points">Qwixx Big Points（双色奖励行）</option>
           <option value="random">随机混排（每局不同）</option>
         </select>
       </section>
@@ -177,13 +180,27 @@ function GameScreen({ game, setGame, setup, log, setLog, onExit }: {
 
   const describe = (playerIdx: number, a: Action, before: GameState): string => {
     const name = setup.players[playerIdx]!.name;
-    if (a.type === 'skipWhite') {
-      return playerIdx === before.activePlayer ? `${name} 白骰阶段跳过` : `${name} 跳过`;
+    switch (a.type) {
+      case 'skipWhite':
+        return playerIdx === before.activePlayer ? `${name} 白骰阶段跳过` : `${name} 跳过`;
+      case 'skipColor':
+        return `${name} 彩骰阶段跳过`;
+      case 'markLucky': {
+        const target = rightmostMark(before, playerIdx, a.row) + 1;
+        const cell = before.config.board.rows[a.row]!.cells[target]!;
+        return `${name} ⭐ 用幸运数字划记 ${colorName(cell.color)}${cell.number}`;
+      }
+      case 'markBonusWhite':
+      case 'markBonusColor': {
+        const n = before.config.board.bonusRows![a.bonus]!.numbers[a.cell]!;
+        return `${name} 划记奖励格 ${n}`;
+      }
+      default: {
+        const cell = before.config.board.rows[a.row]!.cells[a.cell]!;
+        const via = a.type === 'markWhite' ? '白骰' : '白+彩';
+        return `${name} 用${via}划记 ${colorName(cell.color)}${cell.number}`;
+      }
     }
-    if (a.type === 'skipColor') return `${name} 彩骰阶段跳过`;
-    const cell = before.config.board.rows[a.row]!.cells[a.cell]!;
-    const via = a.type === 'markWhite' ? '白骰' : '白+彩';
-    return `${name} 用${via}划记 ${colorName(cell.color)}${cell.number}`;
   };
 
   const step = (a: Action) => {
@@ -217,10 +234,18 @@ function GameScreen({ game, setGame, setup, log, setLog, onExit }: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [game]);
 
+  // 普通格用 "row:cell"，奖励格用 "b:bonus:cell"；幸运划记落到目标格上（已有普通划记动作时不覆盖）。
   const markable = new Map<string, Action>();
   if (isHumanTurn) {
     for (const a of legal) {
       if (a.type === 'markWhite' || a.type === 'markColor') markable.set(`${a.row}:${a.cell}`, a);
+      else if (a.type === 'markBonusWhite' || a.type === 'markBonusColor') markable.set(`b:${a.bonus}:${a.cell}`, a);
+    }
+    for (const a of legal) {
+      if (a.type === 'markLucky') {
+        const key = `${a.row}:${rightmostMark(game, actor, a.row) + 1}`;
+        if (!markable.has(key)) markable.set(key, a);
+      }
     }
   }
   const skipAction = legal.find((a) => a.type === 'skipWhite' || a.type === 'skipColor');
@@ -321,32 +346,68 @@ function PlayerCard({ game, playerIdx, name, isActor, isActive, markable, onMark
   onMark: (a: Action) => void;
 }) {
   const p = game.players[playerIdx]!;
+  const board = game.config.board;
   const score = computeScore(game, playerIdx);
+  const lucky = game.config.luckyNumbers?.[playerIdx];
+
+  const renderBonusRow = (b: number) => {
+    const bonusDef = board.bonusRows![b]!;
+    return (
+      <div className="row bonus-row" key={`b${b}`}>
+        {bonusDef.numbers.map((n, i) => {
+          const key = `b:${b}:${i}`;
+          const clickable = markable.has(key);
+          const cTop = COLOR_CSS[board.rows[bonusDef.adjacent[0]]!.cells[i]!.color];
+          const cBottom = COLOR_CSS[board.rows[bonusDef.adjacent[1]]!.cells[i]!.color];
+          return (
+            <button
+              key={i}
+              className={`cell bonus ${p.bonusMarks[b]![i] ? 'marked' : ''} ${clickable ? 'clickable' : ''}`}
+              style={{ background: `linear-gradient(180deg, ${cTop} 50%, ${cBottom} 50%)` }}
+              disabled={!clickable}
+              onClick={() => onMark(markable.get(key)!)}
+            >
+              {p.bonusMarks[b]![i] ? '✗' : n}
+            </button>
+          );
+        })}
+        <span className="lock-flag" />
+      </div>
+    );
+  };
+
+  const long = board.rows[0]!.cells.length > 12;
   return (
-    <div className={`card ${isActor ? 'actor' : ''} ${isActive ? 'active' : ''}`}>
+    <div className={`card ${isActor ? 'actor' : ''} ${isActive ? 'active' : ''} ${long ? 'long' : ''}`}>
       <div className="card-head">
         <b>{name}</b>
         {isActive && <span className="badge">主动</span>}
+        {lucky && <span className="lucky-badge">⭐ 幸运 {lucky.join(' / ')}</span>}
         <span className="score">{score.total} 分</span>
       </div>
-      {game.config.board.rows.map((rowDef, r) => (
-        <div className={`row ${game.lockedRows[r] ? 'locked' : ''}`} key={r}>
-          {rowDef.cells.map((cell, i) => {
-            const key = `${r}:${i}`;
-            const clickable = markable.has(key);
-            return (
-              <button
-                key={i}
-                className={`cell ${p.marks[r]![i] ? 'marked' : ''} ${clickable ? 'clickable' : ''}`}
-                style={{ background: COLOR_CSS[cell.color] }}
-                disabled={!clickable}
-                onClick={() => onMark(markable.get(key)!)}
-              >
-                {p.marks[r]![i] ? '✗' : cell.number}
-              </button>
-            );
-          })}
-          <span className="lock-flag">{game.lockedRows[r] ? '🔒' : ''}</span>
+      {board.rows.map((rowDef, r) => (
+        <div key={r}>
+          <div className={`row ${game.lockedRows[r] ? 'locked' : ''}`}>
+            {rowDef.cells.map((cell, i) => {
+              const key = `${r}:${i}`;
+              const clickable = markable.has(key);
+              const viaLucky = clickable && markable.get(key)!.type === 'markLucky';
+              return (
+                <button
+                  key={i}
+                  className={`cell ${p.marks[r]![i] ? 'marked' : ''} ${clickable ? 'clickable' : ''} ${viaLucky ? 'lucky' : ''}`}
+                  style={{ background: COLOR_CSS[cell.color] }}
+                  disabled={!clickable}
+                  title={viaLucky ? '幸运数字划记' : undefined}
+                  onClick={() => onMark(markable.get(key)!)}
+                >
+                  {p.marks[r]![i] ? '✗' : cell.number}
+                </button>
+              );
+            })}
+            <span className="lock-flag">{game.lockedRows[r] ? '🔒' : ''}</span>
+          </div>
+          {(board.bonusRows ?? []).map((bd, b) => (bd.adjacent[0] === r ? renderBonusRow(b) : null))}
         </div>
       ))}
       <div className="card-foot">
