@@ -41,8 +41,15 @@ npm run build      # 类型检查 + 生产构建（dist/ 为纯静态站点）
    legalActionMask` 搭 self-play 循环（毫秒级/局，见 arena 实测）；
 3. 训练出的策略实现 `Bot` 接口即可接入网页 UI 与竞技场，和人类或其他机器人对战。
 
-详细架构与接口说明见 [`docs/design.md`](docs/design.md)；
-各版本规则调研（含官方规则 PDF 来源）见 [`docs/rules-research.md`](docs/rules-research.md)。
+## 文档
+
+| 文档 | 内容 |
+|---|---|
+| [`docs/manual.md`](docs/manual.md) | 玩家手册：通用规则、六种记分卡变体的完整规则、界面操作、FAQ |
+| [`docs/api.md`](docs/api.md) | 开发者参考：核心类型、引擎/棋盘/计分/机器人/RL 编码 API、竞技场 CLI 参数 |
+| [`docs/training.md`](docs/training.md) | AI 训练指南：任务形式化、在线自对弈与离线 JSONL 两条路线、策略接入与基线成绩 |
+| [`docs/design.md`](docs/design.md) | 架构设计：状态机、关键规则裁定、变体支持矩阵 |
+| [`docs/rules-research.md`](docs/rules-research.md) | 各版本规则调研报告（含官方规则 PDF 来源与 FAQ 裁定） |
 
 ## 项目结构
 
