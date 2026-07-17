@@ -73,6 +73,7 @@ button.primary:hover { background: #2f8a4e; }
 .row { display: flex; gap: 3px; margin-bottom: 4px; align-items: center; }
 .row.locked { opacity: 0.55; }
 .cell {
+  position: relative;
   width: 36px; height: 34px; padding: 0;
   border: none; border-radius: 5px;
   color: #fff; font-weight: 700; font-size: 0.95em;
@@ -86,7 +87,15 @@ button.primary:hover { background: #2f8a4e; }
 }
 .cell.clickable:hover { transform: scale(1.12); }
 .cell:disabled { cursor: default; }
+.cell.bonus { border-radius: 50%; width: 30px; height: 30px; font-size: 0.8em; }
+.cell.lucky { outline-color: #e0a500; }
+.cell.lucky::after { content: '⭐'; position: absolute; font-size: 0.5em; transform: translate(10px, -12px); }
 .lock-flag { width: 20px; }
+.lucky-badge { color: #b8860b; font-size: 0.85em; }
+
+/* Longo：15 格长行自动缩小格子 */
+.card.long .cell { width: 28px; height: 30px; font-size: 0.82em; }
+.card.long .cell.bonus { width: 24px; height: 24px; }
 
 .card-foot {
   margin-top: 6px; color: #a33; font-weight: 600;

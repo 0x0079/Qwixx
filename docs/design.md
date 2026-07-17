@@ -51,25 +51,36 @@ colorChoice（仅主动玩家：markColor | skipColor）
 记分卡抽象为 `cell(row, index) = {color, number}` 二维表 + 每行 `lockColor`，
 一套合法性判断覆盖经典版与 gemixxt A/B：
 
-| 预设 | 数字 | 颜色 | 计分 |
-|---|---|---|---|
-| `classic` | 红黄 2→12，绿蓝 12→2 | 整行单色 | 按行 |
-| `gemixxt-a` | 同经典 | 行内混色（同一数字四行四色各一） | 按行 |
-| `gemixxt-b` | 行内乱序（锁定数字：红11/黄10/绿3/蓝4） | 整行单色 | 按行 |
-| `randomMixedBoard(seed)` | 行内乱序 | 混色（每色恰 11 格） | 按行 |
+| 预设 | 数字 | 颜色 | 特殊机制 | 计分 |
+|---|---|---|---|---|
+| `classic` | 红黄 2→12，绿蓝 12→2 | 整行单色 | — | 按行 |
+| `gemixxt-a` | 同经典 | 行内混色（同一数字四行四色各一） | — | 按行 |
+| `gemixxt-b` | 行内乱序（锁定数字：红11/黄10/绿3/蓝4） | 整行单色 | — | 按行 |
+| `longo` | 2→16 / 16→2（15 格） | 整行单色 | 八面骰、行尾两格皆可锁（门槛 6）、每人 2 个幸运数字 | 按行（15x=120） |
+| `big-points` | 同经典 | 整行单色 | 两条圆形双色奖励行，计入相邻两行、每行封顶 15 | 按行 |
+| `randomMixedBoard(seed)` | 行内乱序 | 混色（每色恰 11 格） | — | 按行 |
+
+Longo / Big Points 的实现依据官方英文规则 PDF（QwixxLongo_GB.pdf / QwixxBP_GB.pdf），
+关键裁定：Longo 幸运数字只在动作 1（白骰和等于幸运数字）可用，改划"当前划记最少的
+未锁定行"的下一个可划格（不跳格），并可依常规条件锁行；Big Points 奖励格需相邻普通格
+已划过 + 再次掷出同数（白骰和任何人可用；彩骰组合须与已划相邻格同色同数，仅主动玩家），
+奖励行独立遵守从左到右，不计入锁行门槛，只划奖励格不算失误。
 
 注：gemixxt 预设的格子排布满足官方结构约束，但具体排列为本项目自拟（官方卡面
 无公开电子数据）；引擎另支持 `scoreBy: 'color'` 作为自定义计分模式。
-规则参数（失误上限、扣分、锁行门槛、终局锁数）都在 `RulesConfig` 中可调，
-为 Longo 等扩展留了空间。
+规则参数（失误上限、扣分、锁行门槛、骰面数、终局锁数）都在 `RulesConfig` 中可调，
+`configForBoard()` 会自动应用棋盘预设的规则覆盖并生成幸运数字。
 
 ## AI 训练接口（src/ai/encode.ts）
 
-- **动作空间**：固定 90 维离散——`[0,44)` markWhite（row*11+cell）、`[44,88)` markColor、
-  `88` skipWhite、`89` skipColor；`legalActionMask(state)` 返回 0/1 掩码。
-- **观测**：`encodeObservation(state, viewer, maxPlayers=5)` 定长 Float32Array，
-  含各玩家划记与失误（以 viewer 为基准的相对座位序）、锁行、移除骰色、骰值、
-  阶段、是否主动/当前决策者；全部归一化到 [0,1]。
+- **动作空间**：`makeCodec(board)` 按棋盘生成固定维度离散编解码器——
+  markWhite / markColor（4×行长）、markLucky（4）、markBonusWhite / markBonusColor
+  （奖励格数）、2 个跳过；经典棋盘 94 维，Longo 126 维，Big Points 138 维。
+  `legalActionMask(state, codec)` 返回 0/1 掩码。
+- **观测**：`encodeObservation(state, viewer, maxPlayers=5)` 定长 Float32Array（维度由
+  `observationSize(config)` 给出），含各玩家划记/奖励格/失误（以 viewer 为基准的相对
+  座位序）、锁行、移除骰色、骰值（按骰面数归一化）、阶段、是否主动/当前决策者、
+  幸运数字；全部归一化到 [0,1]。
 - **确定性**：种子完全决定骰子序列；同种子 + 同策略 ⇒ 完全相同对局（有测试保证）。
 - **轨迹导出**：`npm run arena -- --games N --bots a,b --traj out/traj.jsonl`
   每行一条 `{seed, turn, actor, bot, obs, action}`，可直接喂给 Python 训练管线

@@ -6,13 +6,22 @@ import {
   applyAction,
   applyActionInPlace,
   whiteSum,
+  configForBoard,
   DEFAULT_RULES,
 } from '../src/core/engine';
-import { CLASSIC_BOARD, GEMIXXT_A_BOARD, GEMIXXT_B_BOARD, randomMixedBoard, validateBoard } from '../src/core/board';
+import {
+  CLASSIC_BOARD,
+  GEMIXXT_A_BOARD,
+  GEMIXXT_B_BOARD,
+  LONGO_BOARD,
+  BIG_POINTS_BOARD,
+  randomMixedBoard,
+  validateBoard,
+} from '../src/core/board';
 import { computeScore, pointsForCount } from '../src/core/scoring';
 import type { Action, GameState } from '../src/core/types';
 import { RandomBot, GreedyBot, HeuristicBot, makeRand } from '../src/ai/bots';
-import { encodeObservation, legalActionMask, actionToIndex, indexToAction, NUM_ACTIONS, observationSize } from '../src/ai/encode';
+import { encodeObservation, legalActionMask, makeCodec, observationSize } from '../src/ai/encode';
 
 function makeGame(numPlayers = 2, seed = 42): GameState {
   return newGame({ ...DEFAULT_RULES, board: CLASSIC_BOARD, numPlayers, seed });
@@ -317,27 +326,215 @@ describe('确定性与机器人', () => {
 });
 
 describe('RL 编码', () => {
-  it('动作索引双向一致', () => {
-    for (let i = 0; i < NUM_ACTIONS; i++) {
-      expect(actionToIndex(indexToAction(i))).toBe(i);
+  it('动作索引双向一致（所有棋盘）', () => {
+    for (const board of [CLASSIC_BOARD, LONGO_BOARD, BIG_POINTS_BOARD]) {
+      const codec = makeCodec(board);
+      for (let i = 0; i < codec.numActions; i++) {
+        expect(codec.actionToIndex(codec.indexToAction(i))).toBe(i);
+      }
     }
+  });
+
+  it('经典棋盘动作空间为 94（88 划记 + 4 幸运 + 2 跳过）', () => {
+    expect(makeCodec(CLASSIC_BOARD).numActions).toBe(94);
+    expect(makeCodec(LONGO_BOARD).numActions).toBe(8 * 15 + 4 + 2);
+    expect(makeCodec(BIG_POINTS_BOARD).numActions).toBe(88 + 4 + 44 + 2);
   });
 
   it('合法动作掩码与 legalActions 一致', () => {
     const s = makeGame(2, 9);
-    const mask = legalActionMask(s);
+    const codec = makeCodec(s.config.board);
+    const mask = legalActionMask(s, codec);
     const legal = legalActions(s);
     expect(Array.from(mask).reduce((a, b) => a + b, 0)).toBe(legal.length);
-    for (const a of legal) expect(mask[actionToIndex(a)]).toBe(1);
+    for (const a of legal) expect(mask[codec.actionToIndex(a)]).toBe(1);
   });
 
-  it('观测维度固定且值域正常', () => {
-    const s = makeGame(3, 5);
-    const obs = encodeObservation(s, 1);
-    expect(obs.length).toBe(observationSize(5));
-    for (const v of obs) {
-      expect(v).toBeGreaterThanOrEqual(0);
-      expect(v).toBeLessThanOrEqual(1);
+  it('观测维度固定且值域正常（含 Longo / Big Points）', () => {
+    for (const board of [CLASSIC_BOARD, LONGO_BOARD, BIG_POINTS_BOARD]) {
+      const s = newGame(configForBoard(board, 3, 5));
+      const obs = encodeObservation(s, 1);
+      expect(obs.length).toBe(observationSize(s.config, 5));
+      for (const v of obs) {
+        expect(v).toBeGreaterThanOrEqual(0);
+        expect(v).toBeLessThanOrEqual(1);
+      }
     }
+  });
+});
+
+describe('Qwixx Longo', () => {
+  function longoGame(seed = 1, numPlayers = 2): GameState {
+    return newGame(configForBoard(LONGO_BOARD, numPlayers, seed));
+  }
+
+  it('配置：八面骰、锁行门槛 6、每人 2 个不同幸运数字', () => {
+    const s = longoGame(42);
+    expect(s.config.dieFaces).toBe(8);
+    expect(s.config.minMarksToLock).toBe(6);
+    expect(s.config.luckyNumbers).toHaveLength(2);
+    for (const pair of s.config.luckyNumbers!) {
+      expect(pair).toHaveLength(2);
+      expect(pair[0]).not.toBe(pair[1]);
+      for (const n of pair) {
+        expect(n).toBeGreaterThanOrEqual(2);
+        expect(n).toBeLessThanOrEqual(16);
+      }
+    }
+  });
+
+  it('骰子点数在 1..8，行长 15', () => {
+    for (let seed = 0; seed < 20; seed++) {
+      const s = longoGame(seed);
+      for (const v of [...s.dice.white, ...Object.values(s.dice.colors)]) {
+        expect(v).toBeGreaterThanOrEqual(1);
+        expect(v).toBeLessThanOrEqual(8);
+      }
+    }
+    expect(LONGO_BOARD.rows[0]!.cells).toHaveLength(15);
+    expect(LONGO_BOARD.rows[0]!.cells[14]!.number).toBe(16);
+    expect(LONGO_BOARD.rows[2]!.cells[14]!.number).toBe(2);
+  });
+
+  it('行尾最后两格都是锁定格：已划 <6 不可划，≥6 可划且划任一格即锁行', () => {
+    let s = longoGame(1);
+    for (const i of [0, 1, 2, 3, 4]) s.players[0]!.marks[0]![i] = true; // 红行 5 格
+    s.dice = { white: [7, 8], colors: { red: 1, yellow: 1, green: 1, blue: 1 } }; // 和 15
+    let marks = legalActions(s).filter((a) => a.type === 'markWhite') as Extract<Action, { type: 'markWhite' }>[];
+    expect(marks.some((m) => m.row === 0 && m.cell === 13)).toBe(false); // 红15 是锁定格
+    s.players[0]!.marks[0]![5] = true; // 第 6 格
+    marks = legalActions(s).filter((a) => a.type === 'markWhite') as Extract<Action, { type: 'markWhite' }>[];
+    expect(marks.some((m) => m.row === 0 && m.cell === 13)).toBe(true);
+    // 划红 15（倒数第二格）也锁行
+    s = applyAction(s, { type: 'markWhite', row: 0, cell: 13 });
+    s = applyAction(s, { type: 'skipWhite' });
+    expect(s.lockedRows[0]).toBe(true);
+    expect(s.removedColors).toContain('red');
+  });
+
+  it('幸运数字：白骰和相等时可改划"划记最少的行"的下一格', () => {
+    const s = longoGame(1);
+    s.config.luckyNumbers = [[5, 8], [12, 13]];
+    // 玩家0：红行已划 2 格，其余行 0 格 → 最少的是黄/绿/蓝三行
+    s.players[0]!.marks[0]![0] = true;
+    s.players[0]!.marks[0]![1] = true;
+    s.dice = { white: [2, 3], colors: { red: 1, yellow: 1, green: 1, blue: 1 } }; // 和 5 = 幸运
+    const lucky = legalActions(s).filter((a) => a.type === 'markLucky') as Extract<Action, { type: 'markLucky' }>[];
+    expect(new Set(lucky.map((l) => l.row))).toEqual(new Set([1, 2, 3]));
+    // 应用：绿行（12..2）的下一格是最左格 16
+    const s2 = applyAction(s, { type: 'markLucky', row: 2 });
+    expect(s2.players[0]!.marks[2]![0]).toBe(true);
+    // 白骰和非幸运数字时无此动作
+    s.dice = { white: [2, 4], colors: { red: 1, yellow: 1, green: 1, blue: 1 } };
+    expect(legalActions(s).some((a) => a.type === 'markLucky')).toBe(false);
+  });
+
+  it('计分：13 数字 + 锁定格 + 锁定奖励 = 15 计数 = 120 分', () => {
+    const s = longoGame(1);
+    for (let i = 0; i < 13; i++) s.players[0]!.marks[0]![i] = true;
+    s.players[0]!.marks[0]![14] = true; // 直接划 16 锁行
+    const sc = computeScore(s, 0);
+    expect(sc.groupCounts[0]).toBe(15);
+    expect(sc.groupPoints[0]).toBe(120);
+  });
+});
+
+describe('Qwixx Big Points', () => {
+  function bpGame(seed = 1): GameState {
+    return newGame(configForBoard(BIG_POINTS_BOARD, 2, seed));
+  }
+
+  it('未划过相邻普通格时不能划奖励格', () => {
+    const s = bpGame();
+    s.dice = { white: [2, 3], colors: { red: 1, yellow: 1, green: 1, blue: 1 } }; // 和 5
+    expect(legalActions(s).some((a) => a.type === 'markBonusWhite')).toBe(false);
+  });
+
+  it('白骰和触发：已划红 5 后，再出白 5 可划相邻奖励格（任何玩家）', () => {
+    const s = bpGame();
+    s.players[0]!.marks[0]![3] = true; // 红5（row0 cell3）
+    s.players[1]!.marks[1]![3] = true; // 玩家1 黄5
+    s.dice = { white: [2, 3], colors: { red: 1, yellow: 1, green: 1, blue: 1 } };
+    // 玩家0（主动）白骰阶段
+    let bonus = legalActions(s).filter((a) => a.type === 'markBonusWhite') as Extract<Action, { type: 'markBonusWhite' }>[];
+    expect(bonus).toEqual([{ type: 'markBonusWhite', bonus: 0, cell: 3 }]);
+    // 玩家1 白骰阶段同样可划
+    const s2 = applyAction(s, { type: 'skipWhite' });
+    bonus = legalActions(s2).filter((a) => a.type === 'markBonusWhite') as Extract<Action, { type: 'markBonusWhite' }>[];
+    expect(bonus).toEqual([{ type: 'markBonusWhite', bonus: 0, cell: 3 }]);
+  });
+
+  it('彩骰触发：需要"同色同数"的相邻格已划过', () => {
+    let s = bpGame();
+    s.players[0]!.marks[2]![2] = true; // 绿10（row2 cell2）
+    s.dice = { white: [4, 1], colors: { green: 6, blue: 6 } }; // 绿 4+6=10，蓝 4+6=10
+    s = applyAction(s, { type: 'skipWhite' });
+    s = applyAction(s, { type: 'skipWhite' });
+    expect(s.phase).toBe('colorChoice');
+    const bonus = legalActions(s).filter((a) => a.type === 'markBonusColor') as Extract<Action, { type: 'markBonusColor' }>[];
+    // 绿10 已划 → 绿组合可触发；蓝10 未划 → 蓝组合不算独立触发（同一格只列一次）
+    expect(bonus).toEqual([{ type: 'markBonusColor', bonus: 1, cell: 2 }]);
+    // 若只划过蓝 10 而掷出的组合只有绿能凑 10 → 不可触发
+    const t = bpGame();
+    t.players[0]!.marks[3]![2] = true; // 蓝10
+    t.dice = { white: [4, 1], colors: { green: 6 } };
+    let t2 = applyAction(t, { type: 'skipWhite' });
+    t2 = applyAction(t2, { type: 'skipWhite' });
+    expect(legalActions(t2).some((a) => a.type === 'markBonusColor')).toBe(false);
+  });
+
+  it('只划奖励格不算失误', () => {
+    let s = bpGame();
+    s.players[0]!.marks[0]![3] = true; // 红5
+    s.dice = { white: [2, 3], colors: {} };
+    s = applyAction(s, { type: 'markBonusWhite', bonus: 0, cell: 3 });
+    s = applyAction(s, { type: 'skipWhite' });
+    s = applyAction(s, { type: 'skipColor' });
+    expect(s.players[0]!.penalties).toBe(0);
+  });
+
+  it('奖励行从左到右，跳过的奖励格不能回头', () => {
+    const s = bpGame();
+    s.players[0]!.marks[0]![3] = true; // 红5
+    s.players[0]!.bonusMarks[0]![7] = true; // 已划奖励 9
+    s.dice = { white: [2, 3], colors: {} }; // 和 5
+    expect(legalActions(s).some((a) => a.type === 'markBonusWhite')).toBe(false);
+  });
+
+  it('奖励格不计入锁行门槛', () => {
+    const s = bpGame();
+    for (const i of [0, 1, 2, 3]) s.players[0]!.marks[0]![i] = true; // 红行 4 格
+    for (const i of [0, 1, 2]) s.players[0]!.bonusMarks[0]![i] = true; // 奖励 3 格
+    s.dice = { white: [6, 6], colors: {} };
+    // 4 + 3 = 7 > 5，但奖励不计入 → 仍不能锁
+    expect(legalActions(s).some((a) => a.type === 'markWhite' && a.row === 0 && a.cell === 10)).toBe(false);
+  });
+
+  it('相邻行锁定后奖励格仍可划', () => {
+    let s = bpGame();
+    for (const i of [0, 1, 2, 3, 4, 9]) s.players[0]!.marks[0]![i] = true; // 红行 6 格（含 11）
+    s.players[0]!.marks[0]![10] = true; // 红12 → 锁定
+    s.dice = { white: [5, 6], colors: {} };
+    s = applyAction(s, { type: 'skipWhite' });
+    s = applyAction(s, { type: 'skipWhite' });
+    s = applyAction(s, { type: 'skipColor' });
+    expect(s.lockedRows[0]).toBe(true);
+    // 下一回合（主动玩家变为 1，先跳过）：白骰和 11，红 11 已划 → 奖励 11（bonus0 cell9）可划
+    s.dice = { white: [5, 6], colors: s.dice.colors };
+    s = applyAction(s, { type: 'skipWhite' }); // 玩家1
+    const bonus = legalActions(s).filter((a) => a.type === 'markBonusWhite') as Extract<Action, { type: 'markBonusWhite' }>[];
+    expect(bonus).toEqual([{ type: 'markBonusWhite', bonus: 0, cell: 9 }]);
+  });
+
+  it('计分：奖励格计入相邻两行，每行封顶 15', () => {
+    const s = bpGame();
+    // 红行满 11 格 + 锁定奖励 = 12；奖励行划 5 格 → 红 17 → 封顶 15；黄 0+5=5
+    for (let i = 0; i < 11; i++) s.players[0]!.marks[0]![i] = true;
+    for (let i = 0; i < 5; i++) s.players[0]!.bonusMarks[0]![i] = true;
+    const sc = computeScore(s, 0);
+    expect(sc.groupCounts[0]).toBe(15); // 11 + 1锁 + 5奖励 = 17 → 15
+    expect(sc.groupPoints[0]).toBe(120);
+    expect(sc.groupCounts[1]).toBe(5);
+    expect(sc.groupPoints[1]).toBe(15);
   });
 });

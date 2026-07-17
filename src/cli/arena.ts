@@ -7,11 +7,11 @@
  */
 import { mkdirSync, createWriteStream } from 'node:fs';
 import { dirname } from 'node:path';
-import { newGame, currentActor, applyActionInPlace, legalActions, DEFAULT_RULES } from '../core/engine';
+import { newGame, currentActor, applyActionInPlace, configForBoard } from '../core/engine';
 import { BOARD_PRESETS, randomMixedBoard } from '../core/board';
 import type { GameState } from '../core/types';
 import { BOT_REGISTRY, makeRand, type Bot } from '../ai/bots';
-import { encodeObservation, actionToIndex } from '../ai/encode';
+import { encodeObservation, makeCodec } from '../ai/encode';
 
 interface Args {
   games: number;
@@ -46,12 +46,8 @@ function playGame(
   const boardDef = board.startsWith('random')
     ? randomMixedBoard(seed)
     : BOARD_PRESETS[board] ?? BOARD_PRESETS['classic']!;
-  const state = newGame({
-    ...DEFAULT_RULES,
-    board: boardDef,
-    numPlayers: bots.length,
-    seed,
-  });
+  const state = newGame(configForBoard(boardDef, bots.length, seed));
+  const codec = makeCodec(boardDef);
   const rands = bots.map((_, i) => makeRand(seed * 7919 + i));
   let steps = 0;
   while (state.phase !== 'gameOver') {
@@ -66,7 +62,7 @@ function playGame(
           actor,
           bot: bots[actor]!.name,
           obs: Array.from(encodeObservation(state, actor)),
-          action: actionToIndex(action),
+          action: codec.actionToIndex(action),
         }) + '\n',
       );
     }

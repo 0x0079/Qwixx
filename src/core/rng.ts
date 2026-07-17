@@ -8,10 +8,10 @@ export function nextRand(state: number): { value: number; state: number } {
   return { value, state: t };
 }
 
-/** 掷一个六面骰。 */
-export function rollDie(state: number): { value: number; state: number } {
+/** 掷一个 faces 面骰（点数 1..faces；经典 6，Longo 8）。 */
+export function rollDie(state: number, faces = 6): { value: number; state: number } {
   const { value, state: s } = nextRand(state);
-  return { value: 1 + Math.floor(value * 6), state: s };
+  return { value: 1 + Math.floor(value * faces), state: s };
 }
 
 /** 由任意整数种子生成初始 RNG 状态。 */
