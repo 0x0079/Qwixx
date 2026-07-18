@@ -100,7 +100,7 @@ const COLOR_CSS: Record<string, string> = {
   blue: '#3971ce',
 };
 
-const AI_DELAY_MS = 650;
+const AI_DELAY_MS = 300;
 
 export function App() {
   const [setup, setSetup] = useState<Setup>({
