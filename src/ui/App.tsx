@@ -85,6 +85,55 @@ const BOARD_OPTIONS: BoardOption[] = [
     meta: '奖励行 · 15 格计分',
   },
   {
+    id: 'double-a',
+    title: 'Qwixx Double A',
+    tag: '双重划记',
+    description: '每行最近划下的数字可以再次命中，单行最高 136 分。',
+    meta: '重复最近格 · 锁行门槛 7',
+  },
+  {
+    id: 'double-b',
+    title: 'Qwixx Double B',
+    tag: '乘数格',
+    description: '每行四个官方双倍格，一次命中会计作两个叉。',
+    meta: '四个双倍格 · 16 格计分',
+  },
+  {
+    id: 'bonus-a',
+    title: 'Qwixx Bonus A',
+    tag: '连锁',
+    description: '命中奖励格后按颜色轨立刻追加划记，并可能连续触发。',
+    meta: '12 个奖励格 · 强制追加',
+  },
+  {
+    id: 'bonus-b',
+    title: 'Qwixx Bonus B',
+    tag: '组合',
+    description: '凑齐成对符号，解锁追加划记、加分、翻倍或免扣分。',
+    meta: '5 种成对符号',
+  },
+  {
+    id: 'connected-steps',
+    title: 'Connected A',
+    tag: '阶梯',
+    description: '每名玩家使用不同 A–E 卡，阶梯格组成第五个计分组。',
+    meta: '11 个阶梯格 · 额外计分',
+  },
+  {
+    id: 'connected-chain',
+    title: 'Connected B',
+    tag: '连线',
+    description: '划下连锁格时，另一端无视常规限制自动划下。',
+    meta: 'A–E 卡面 · 自动连锁',
+  },
+  {
+    id: 'x-change',
+    title: 'Qwixx X-Change',
+    tag: '换数',
+    description: '白骰阶段可按顺序使用九组交换，改变自己本次的和值。',
+    meta: '9 次有序交换机会',
+  },
+  {
     id: 'random',
     title: '随机混排',
     tag: '每局不同',
@@ -413,6 +462,20 @@ function GameScreen({ game, setGame, setup, log, setLog, onExit, onRestart }: {
         const n = before.config.board.bonusRows![action.bonus]!.numbers[action.cell]!;
         return `${name} 划记奖励格 ${n}`;
       }
+      case 'markDoubleWhite':
+      case 'markDoubleColor': {
+        const cell = before.config.board.rows[action.row]!.cells[action.cell]!;
+        return `${name} 再次划记 ${colorName(cell.color)}色 ${cell.number}`;
+      }
+      case 'markWhiteExchange': {
+        const cell = before.config.board.rows[action.row]!.cells[action.cell]!;
+        const swap = before.config.board.variant?.kind === 'x-change' ? before.config.board.variant.swaps[action.swap] : undefined;
+        return `${name} 用 X-Change ${swap?.join('↔')} 划记 ${colorName(cell.color)}色 ${cell.number}`;
+      }
+      case 'markForced': {
+        const cell = before.config.board.rows[action.row]!.cells[action.cell]!;
+        return `${name} 用奖励追加划记 ${colorName(cell.color)}色 ${cell.number}`;
+      }
       default: {
         const cell = before.config.board.rows[action.row]!.cells[action.cell]!;
         const via = action.type === 'markWhite' ? '白骰' : '白骰 + 彩骰';
@@ -454,8 +517,11 @@ function GameScreen({ game, setGame, setup, log, setLog, onExit, onRestart }: {
   const markable = new Map<string, Action>();
   if (isHumanTurn) {
     for (const action of legal) {
-      if (action.type === 'markWhite' || action.type === 'markColor') {
-        markable.set(`${action.row}:${action.cell}`, action);
+      if (action.type === 'markWhite' || action.type === 'markColor'
+        || action.type === 'markDoubleWhite' || action.type === 'markDoubleColor'
+        || action.type === 'markWhiteExchange' || action.type === 'markForced') {
+        const key = `${action.row}:${action.cell}`;
+        if (!markable.has(key)) markable.set(key, action);
       } else if (action.type === 'markBonusWhite' || action.type === 'markBonusColor') {
         markable.set(`b:${action.bonus}:${action.cell}`, action);
       }
@@ -499,12 +565,12 @@ function GameScreen({ game, setGame, setup, log, setLog, onExit, onRestart }: {
               <div><span>主动玩家</span><strong>{setup.players[game.activePlayer]!.name}</strong></div>
             </div>
             <div className="phase-steps" aria-label="回合进度">
-              <div className={`phase-step ${game.phase === 'whiteChoice' ? 'current' : 'done'}`}>
-                <span>{game.phase === 'whiteChoice' ? '1' : <Icon name="check" />}</span>
+              <div className={`phase-step ${game.phase === 'whiteChoice' || (game.phase === 'bonusChoice' && game.pendingBonus?.resume === 'whiteChoice') ? 'current' : 'done'}`}>
+                <span>{game.phase === 'whiteChoice' || (game.phase === 'bonusChoice' && game.pendingBonus?.resume === 'whiteChoice') ? '1' : <Icon name="check" />}</span>
                 <div><strong>全员选择</strong><small>两颗白骰之和</small></div>
               </div>
               <i />
-              <div className={`phase-step ${game.phase === 'colorChoice' ? 'current' : ''}`}>
+              <div className={`phase-step ${game.phase === 'colorChoice' || (game.phase === 'bonusChoice' && game.pendingBonus?.resume === 'colorChoice') ? 'current' : ''}`}>
                 <span>2</span>
                 <div><strong>主动加码</strong><small>一白骰 + 一彩骰</small></div>
               </div>
@@ -685,7 +751,37 @@ function PlayerCard({ game, playerIdx, name, kind, isActor, isActive, markable, 
   const score = computeScore(game, playerIdx);
   const lucky = game.config.luckyNumbers?.[playerIdx];
   const totalMarks = player.marks.reduce((sum, row) => sum + row.filter(Boolean).length, 0)
+    + player.secondMarks.reduce((sum, row) => sum + row.filter(Boolean).length, 0)
     + player.bonusMarks.reduce((sum, row) => sum + row.filter(Boolean).length, 0);
+
+  const variantStatus = (() => {
+    if (board.variant?.kind === 'x-change') return `↔ ${(player.variantState.xChangeThrough ?? -1) + 1}/${board.variant.swaps.length}`;
+    if (board.variant?.kind === 'bonus-a') return `奖励轨 ${player.variantState.bonusTrackUsed!.filter(Boolean).length}/${board.variant.rewardTrack.length}`;
+    if (board.variant?.kind === 'bonus-b') return `符号 ${Object.values(player.variantState.bonusSymbols ?? {}).filter(Boolean).length}/5`;
+    if (board.variant?.kind === 'connected-steps' || board.variant?.kind === 'connected-chain') return `卡面 ${String.fromCharCode(65 + playerIdx % 5)}`;
+    return undefined;
+  })();
+
+  const cellBadge = (row: number, cell: number): string | undefined => {
+    const variant = board.variant;
+    if (variant?.kind === 'double-b' && variant.multiplierCells.includes(cell)) return '×2';
+    if (variant?.kind === 'bonus-a' && variant.triggerCells.some((ref) => ref.row === row && ref.cell === cell)) return '◆';
+    if (variant?.kind === 'bonus-b') {
+      const symbols: Record<string, string> = { circle: '○', diamond: '◇', square: '□', octagon: '⬡', star: '✹' };
+      for (const [symbol, refs] of Object.entries(variant.symbols)) {
+        if (refs.some((ref) => ref.row === row && ref.cell === cell)) return symbols[symbol];
+      }
+    }
+    if (variant?.kind === 'connected-steps') {
+      const sheet = variant.sheets[playerIdx % variant.sheets.length]!;
+      if (sheet.some((ref) => ref.row === row && ref.cell === cell)) return '阶';
+    }
+    if (variant?.kind === 'connected-chain') {
+      const sheet = variant.sheets[playerIdx % variant.sheets.length]!;
+      if (sheet.some((pair) => pair.some((ref) => ref.row === row && ref.cell === cell))) return '链';
+    }
+    return undefined;
+  };
 
   const renderBonusRow = (bonus: number) => {
     const bonusDef = board.bonusRows![bonus]!;
@@ -739,6 +835,7 @@ function PlayerCard({ game, playerIdx, name, kind, isActor, isActive, markable, 
         <div className="card-badges">
           {isActor && <span className="badge actor-badge">正在选择</span>}
           {lucky && <span className="lucky-badge">⭐ {lucky.join(' / ')}</span>}
+          {variantStatus && <span className="variant-badge">{variantStatus}</span>}
           {onSkip && (
             <button className="card-skip-button" type="button" aria-label={`${skipLabel}，${name}`} onClick={onSkip}>
               {skipLabel}<Icon name="skip" />
@@ -762,17 +859,20 @@ function PlayerCard({ game, playerIdx, name, kind, isActor, isActive, markable, 
                     const action = markable.get(key);
                     const viaLucky = action?.type === 'markLucky';
                     const marked = player.marks[row]![cellIndex];
+                    const second = player.secondMarks[row]![cellIndex];
+                    const badge = cellBadge(row, cellIndex);
                     return (
                       <button
                         key={cellIndex}
-                        className={`cell ${marked ? 'marked' : ''} ${action ? 'clickable' : ''} ${viaLucky ? 'lucky' : ''}`}
+                        className={`cell ${marked ? 'marked' : ''} ${second ? 'second-marked' : ''} ${badge ? 'special-cell' : ''} ${action ? 'clickable' : ''} ${viaLucky ? 'lucky' : ''}`}
                         style={{ background: COLOR_CSS[cell.color] }}
                         disabled={!action}
                         title={action ? actionTooltip(action, game) : undefined}
                         aria-label={`${colorName(cell.color)}色 ${cell.number}${marked ? '，已划记' : action ? '，可以选择' : ''}`}
                         onClick={() => action && onMark(action)}
                       >
-                        {marked ? '×' : cell.number}
+                        {second ? '××' : marked ? '×' : cell.number}
+                        {badge && !second && <small>{badge}</small>}
                       </button>
                     );
                   })}
@@ -804,7 +904,7 @@ function PlayerCard({ game, playerIdx, name, kind, isActor, isActive, markable, 
             <i className={i < player.penalties ? 'filled' : ''} key={i}>{i < player.penalties ? '×' : ''}</i>
           ))}
         </div>
-        <span className="score-detail">行分 {score.groupPoints.join(' + ')} <b>− {score.penaltyPoints}</b></span>
+        <span className="score-detail">行分 {score.groupPoints.join(' + ')}{score.variantBonusPoints > 0 ? ` + ${score.variantBonusPoints}` : ''} <b>− {score.penaltyPoints}</b></span>
       </footer>
     </article>
   );
@@ -814,6 +914,7 @@ function actionTitle(game: GameState, setup: Setup, actor: number, legalMarks: n
   const name = setup.players[actor]!.name;
   if (!isHumanTurn) return `${name} 正在思考…`;
   if (legalMarks === 0) return `${name}，当前没有可划记的格子`;
+  if (game.phase === 'bonusChoice') return `${name}，请选择奖励追加格`;
   return game.phase === 'whiteChoice'
     ? `${name}，请选择数字 ${whiteSum(game)}`
     : `${name}，选择一个白骰 + 彩骰组合`;
@@ -821,6 +922,7 @@ function actionTitle(game: GameState, setup: Setup, actor: number, legalMarks: n
 
 function actionDescription(game: GameState, legalMarks: number, isHumanTurn: boolean): string {
   if (!isHumanTurn) return 'AI 完成选择后会自动继续，请稍候。';
+  if (game.phase === 'bonusChoice') return '奖励划记必须执行；可选格已用绿色描边标出。';
   if (legalMarks === 0) return game.phase === 'whiteChoice' ? '跳过不会受到惩罚。' : '结束回合；若本回合没有划记，将记录一次失误。';
   return game.phase === 'whiteChoice'
     ? '记分卡上带绿色描边的格子可以点击；非主动玩家跳过无惩罚。'
@@ -829,6 +931,12 @@ function actionDescription(game: GameState, legalMarks: number, isHumanTurn: boo
 
 function actionTooltip(action: Action, game: GameState): string {
   if (action.type === 'markLucky') return '使用幸运数字划记下一格';
+  if (action.type === 'markForced') return '使用已触发的奖励追加划记';
+  if (action.type === 'markDoubleWhite' || action.type === 'markDoubleColor') return '把本行最近的数字划记第二次';
+  if (action.type === 'markWhiteExchange') {
+    const swap = game.config.board.variant?.kind === 'x-change' ? game.config.board.variant.swaps[action.swap] : undefined;
+    return `使用 X-Change ${swap?.join(' ↔ ')}`;
+  }
   if (action.type === 'markWhite') return `使用两颗白骰之和 ${whiteSum(game)}`;
   if (action.type === 'markColor') {
     const cell = game.config.board.rows[action.row]!.cells[action.cell]!;
