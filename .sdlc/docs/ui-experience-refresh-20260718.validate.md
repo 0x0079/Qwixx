@@ -46,3 +46,9 @@ The requested UI/UX improvement is functional and preserves the existing rules-e
 - The global action banner contains no buttons and remains informational.
 - At a 1980×900 viewport, the skip control is approximately 226 px from the nearest legal score cell.
 - Activating skip advances the white-dice queue and changes the same local control to `结束回合` for the color phase.
+
+## Player Status Identity Check
+
+- The `主动玩家` badge renders directly beside the active player's name with a 6 px visual gap.
+- `主动玩家` remains attached to `activePlayer` while `正在选择` independently follows the current actor.
+- During another player's white-dice decision, the active player retains only the identity badge and the actor receives only the decision badge.

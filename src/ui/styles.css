@@ -584,14 +584,16 @@ summary:focus-visible,
 .card-head { min-height: 68px; display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-bottom: 1px solid #ebe7df; }
 .card-head .player-avatar { width: 38px; height: 38px; border-radius: 11px; }
 .card-player { display: grid; min-width: 0; gap: 2px; }
+.player-name-line { display: flex; align-items: center; min-width: 0; gap: 6px; }
 .card-player strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
-.card-player span { color: var(--muted); font-size: 9px; }
+.card-player > span { color: var(--muted); font-size: 9px; }
 .card-badges { display: flex; align-items: center; gap: 5px; margin-left: auto; }
 .card-skip-button { min-height: 32px; padding: 0 10px; border-color: #d4d2ca; background: white; color: #4f5c54; border-radius: 9px; font-size: 10px; }
 .card-skip-button:hover { border-color: var(--green); background: var(--green-soft); color: var(--green-dark); transform: translateX(1px); }
 .card-skip-button .icon { width: 13px; height: 13px; }
 .badge, .lucky-badge { padding: 4px 7px; border-radius: 6px; font-size: 8px; font-weight: 750; white-space: nowrap; }
 .badge { background: #fff3d4; color: #946900; }
+.active-player-badge { flex: 0 0 auto; }
 .actor-badge { background: var(--green-soft); color: var(--green); }
 .lucky-badge { background: #fff7de; color: #916d0d; }
 .card-score { min-width: 51px; display: flex; align-items: baseline; justify-content: flex-end; gap: 3px; padding-left: 9px; border-left: 1px solid #e8e4dc; }

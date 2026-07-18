@@ -721,12 +721,14 @@ function PlayerCard({ game, playerIdx, name, kind, isActor, isActive, markable, 
       <div className="card-head">
         <span className={`player-avatar avatar-${playerIdx % 5}`} aria-hidden="true">{name.charAt(0)}</span>
         <div className="card-player">
-          <strong>{name}</strong>
+          <div className="player-name-line">
+            <strong>{name}</strong>
+            {isActive && <span className="badge active-player-badge">主动玩家</span>}
+          </div>
           <span>{KIND_LABEL[kind]} · {totalMarks} 次划记</span>
         </div>
         <div className="card-badges">
           {isActor && <span className="badge actor-badge">正在选择</span>}
-          {!isActor && isActive && <span className="badge">主动玩家</span>}
           {lucky && <span className="lucky-badge">⭐ {lucky.join(' / ')}</span>}
           {onSkip && (
             <button className="card-skip-button" type="button" aria-label={`${skipLabel}，${name}`} onClick={onSkip}>
