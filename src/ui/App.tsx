@@ -23,7 +23,7 @@ interface PlayerSetup {
 interface Setup {
   players: PlayerSetup[];
   boardId: string;
-  seed: number;
+  seed: string;
 }
 
 interface BoardOption {
@@ -101,6 +101,7 @@ const COLOR_CSS: Record<string, string> = {
 };
 
 const AI_DELAY_MS = 300;
+const randomSeed = () => Math.floor(Math.random() * 1_000_000);
 
 export function App() {
   const [setup, setSetup] = useState<Setup>({
@@ -109,17 +110,21 @@ export function App() {
       { name: '小 Q', kind: 'heuristic' },
     ],
     boardId: 'classic',
-    seed: Math.floor(Math.random() * 1_000_000),
+    seed: '',
   });
   const [game, setGame] = useState<GameState | null>(null);
   const [log, setLog] = useState<string[]>([]);
 
   const startGame = () => {
+    const explicitSeed = Number.parseInt(setup.seed, 10);
+    const matchSeed = setup.seed.trim() === '' || !Number.isFinite(explicitSeed)
+      ? randomSeed()
+      : explicitSeed;
     const board = setup.boardId === 'random'
-      ? randomMixedBoard(setup.seed)
+      ? randomMixedBoard(matchSeed)
       : BOARD_PRESETS[setup.boardId]!;
     setLog([]);
-    setGame(newGame(configForBoard(board, setup.players.length, setup.seed)));
+    setGame(newGame(configForBoard(board, setup.players.length, matchSeed)));
   };
 
   if (!game) {
@@ -292,14 +297,16 @@ function SetupScreen({ setup, setSetup, onStart }: {
                   id="game-seed"
                   type="number"
                   value={setup.seed}
-                  onChange={(e) => setSetup({ ...setup, seed: parseInt(e.target.value || '0', 10) })}
+                  placeholder="留空则每局随机"
+                  step="1"
+                  onChange={(e) => setSetup({ ...setup, seed: e.target.value })}
                 />
                 <button
                   type="button"
                   className="icon-button"
                   title="生成新种子"
                   aria-label="生成新随机种子"
-                  onClick={() => setSetup({ ...setup, seed: Math.floor(Math.random() * 1_000_000) })}
+                  onClick={() => setSetup({ ...setup, seed: String(randomSeed()) })}
                 >
                   <Icon name="shuffle" />
                 </button>
@@ -373,8 +380,8 @@ function GameScreen({ game, setGame, setup, log, setLog, onExit, onRestart }: {
 
   useEffect(() => {
     bots.current = setup.players.map((p) => (p.kind === 'human' ? null : BOT_REGISTRY[p.kind]!()));
-    rands.current = setup.players.map((_, i) => makeRand(setup.seed * 31 + i));
-  }, [setup]);
+    rands.current = setup.players.map((_, i) => makeRand(game.config.seed * 31 + i));
+  }, [game.config.seed, setup.players]);
 
   useEffect(() => {
     if (!showExitConfirm) return;
