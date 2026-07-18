@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import type { Action, GameState } from '../core/types';
+import type { Action, BonusSymbol, GameState } from '../core/types';
 import {
   newGame,
   currentActor,
@@ -33,6 +33,23 @@ interface BoardOption {
   description: string;
   meta: string;
 }
+
+type SpecialMarkerKind = 'multiplier' | 'trigger' | 'symbol' | 'steps' | 'chain';
+
+interface SpecialMarker {
+  text: string;
+  kind: SpecialMarkerKind;
+  description: string;
+  legend: string;
+}
+
+const BONUS_SYMBOL_MARKERS: Record<BonusSymbol, SpecialMarker> = {
+  circle: { text: '○', kind: 'symbol', description: '圆形奖励：集齐一对后在最少行追加 2 格', legend: '最少行 +2' },
+  diamond: { text: '◇', kind: 'symbol', description: '菱形奖励：集齐一对后四行各追加 1 格', legend: '每行 +1' },
+  square: { text: '□', kind: 'symbol', description: '方形奖励：集齐一对后最低行终局分数翻倍', legend: '最低行 ×2' },
+  octagon: { text: '⬡', kind: 'symbol', description: '八边形奖励：集齐一对后终局加 13 分', legend: '终局 +13' },
+  star: { text: '✹', kind: 'symbol', description: '星形奖励：集齐一对后免除失误扣分', legend: '免失误扣分' },
+};
 
 const KIND_LABEL: Record<PlayerKind, string> = {
   human: '人类玩家',
@@ -831,26 +848,50 @@ function PlayerCard({ game, playerIdx, name, kind, isActor, isActive, markable, 
     return undefined;
   })();
 
-  const cellBadge = (row: number, cell: number): string | undefined => {
+  const cellBadge = (row: number, cell: number): SpecialMarker | undefined => {
     const variant = board.variant;
-    if (variant?.kind === 'double-b' && variant.multiplierCells.includes(cell)) return '×2';
-    if (variant?.kind === 'bonus-a' && variant.triggerCells.some((ref) => ref.row === row && ref.cell === cell)) return '◆';
+    if (variant?.kind === 'double-b' && variant.multiplierCells.includes(cell)) {
+      return { text: '×2', kind: 'multiplier', description: '双倍格：一次划记计作两个叉', legend: '一次计 2 叉' };
+    }
+    if (variant?.kind === 'bonus-a' && variant.triggerCells.some((ref) => ref.row === row && ref.cell === cell)) {
+      return { text: '◆', kind: 'trigger', description: '奖励格：划下后触发颜色轨追加', legend: '触发颜色轨' };
+    }
     if (variant?.kind === 'bonus-b') {
-      const symbols: Record<string, string> = { circle: '○', diamond: '◇', square: '□', octagon: '⬡', star: '✹' };
-      for (const [symbol, refs] of Object.entries(variant.symbols)) {
-        if (refs.some((ref) => ref.row === row && ref.cell === cell)) return symbols[symbol];
+      for (const [symbol, refs] of Object.entries(variant.symbols) as [BonusSymbol, { row: number; cell: number }[]][]) {
+        if (refs.some((ref) => ref.row === row && ref.cell === cell)) return BONUS_SYMBOL_MARKERS[symbol];
       }
     }
     if (variant?.kind === 'connected-steps') {
       const sheet = variant.sheets[playerIdx % variant.sheets.length]!;
-      if (sheet.some((ref) => ref.row === row && ref.cell === cell)) return '阶';
+      if (sheet.some((ref) => ref.row === row && ref.cell === cell)) {
+        return { text: '阶', kind: 'steps', description: '阶梯格：同时计入颜色行和阶梯组', legend: '另计阶梯组' };
+      }
     }
     if (variant?.kind === 'connected-chain') {
       const sheet = variant.sheets[playerIdx % variant.sheets.length]!;
-      if (sheet.some((pair) => pair.some((ref) => ref.row === row && ref.cell === cell))) return '链';
+      if (sheet.some((pair) => pair.some((ref) => ref.row === row && ref.cell === cell))) {
+        return { text: '链', kind: 'chain', description: '连锁格：划下后自动划记配对端', legend: '自动划配对端' };
+      }
     }
     return undefined;
   };
+
+  const specialLegend: SpecialMarker[] = (() => {
+    switch (board.variant?.kind) {
+      case 'double-b':
+        return [{ text: '×2', kind: 'multiplier', description: '双倍格', legend: '一次计 2 叉' }];
+      case 'bonus-a':
+        return [{ text: '◆', kind: 'trigger', description: '奖励格', legend: '触发颜色轨' }];
+      case 'bonus-b':
+        return Object.values(BONUS_SYMBOL_MARKERS);
+      case 'connected-steps':
+        return [{ text: '阶', kind: 'steps', description: '阶梯格', legend: '另计阶梯组' }];
+      case 'connected-chain':
+        return [{ text: '链', kind: 'chain', description: '连锁格', legend: '自动划配对端' }];
+      default:
+        return [];
+    }
+  })();
 
   const renderBonusRow = (bonus: number) => {
     const bonusDef = board.bonusRows![bonus]!;
@@ -876,7 +917,7 @@ function PlayerCard({ game, playerIdx, name, kind, isActor, isActive, markable, 
                 aria-label={`${player.bonusMarks[bonus]![cell] ? '已划记' : '奖励格'} ${number}${action ? '，可以选择' : ''}`}
                 onClick={() => action && onMark(action)}
               >
-                {player.bonusMarks[bonus]![cell] ? '×' : number}
+                <span className="cell-value">{player.bonusMarks[bonus]![cell] ? '×' : number}</span>
               </button>
             );
           })}
@@ -914,6 +955,17 @@ function PlayerCard({ game, playerIdx, name, kind, isActor, isActive, markable, 
         <div className="card-score"><strong>{score.total}</strong><span>分</span></div>
       </div>
 
+      {specialLegend.length > 0 && (
+        <div className="special-mark-legend" aria-label="特殊格图例">
+          <strong>特殊格</strong>
+          {specialLegend.map((item) => (
+            <span className="legend-item" key={`${item.text}-${item.legend}`} title={item.description}>
+              <i className={`legend-marker marker-${item.kind}`}>{item.text}</i>{item.legend}
+            </span>
+          ))}
+        </div>
+      )}
+
       <div className="sheet-scroll" tabIndex={long ? 0 : undefined} aria-label={long ? `${name} 的记分卡，可横向滚动` : undefined}>
         <div className="score-sheet">
           {board.rows.map((rowDef, row) => (
@@ -930,18 +982,19 @@ function PlayerCard({ game, playerIdx, name, kind, isActor, isActive, markable, 
                     const marked = player.marks[row]![cellIndex];
                     const second = player.secondMarks[row]![cellIndex];
                     const badge = cellBadge(row, cellIndex);
+                    const title = [action ? actionTooltip(action, game) : undefined, badge?.description].filter(Boolean).join(' · ') || undefined;
                     return (
                       <button
                         key={cellIndex}
                         className={`cell ${marked ? 'marked' : ''} ${second ? 'second-marked' : ''} ${badge ? 'special-cell' : ''} ${action ? 'clickable' : ''} ${viaLucky ? 'lucky' : ''}`}
                         style={{ background: COLOR_CSS[cell.color] }}
                         disabled={!action}
-                        title={action ? actionTooltip(action, game) : undefined}
-                        aria-label={`${colorName(cell.color)}色 ${cell.number}${marked ? '，已划记' : action ? '，可以选择' : ''}`}
+                        title={title}
+                        aria-label={`${colorName(cell.color)}色 ${cell.number}${badge ? `，${badge.description}` : ''}${marked ? '，已划记' : action ? '，可以选择' : ''}`}
                         onClick={() => action && onMark(action)}
                       >
-                        {second ? '××' : marked ? '×' : cell.number}
-                        {badge && !second && <small>{badge}</small>}
+                        <span className="cell-value">{second ? '××' : marked ? '×' : cell.number}</span>
+                        {badge && <small className={`cell-marker marker-${badge.kind}`}>{badge.text}</small>}
                       </button>
                     );
                   })}
