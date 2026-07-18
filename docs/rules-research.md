@@ -200,15 +200,24 @@ ROLL(active) → ACTION1_WINDOW(所有玩家同时决策) → resolve1
 
 > 实现要点（版本 B）："自动连锁划记豁免一切常规合法性检查"是对状态机的特殊旁路，且官方未明说被自动划的格子是否影响该行后续"从左到右"的基准；保守实现可把它同样纳入 rightmost 计算（此点官方文本未显式裁定，**存在解释空间**）。
 
-### 4.5 Qwixx On Board（独立游戏，NSV，2019）
+### 4.5 Qwixx Double（替换记分本扩展，NSV，2022）
 
-[BGG](https://boardgamegeek.com/boardgame/287691/qwixx-on-board)：2–4 人，约 20 分钟。官方描述："规则与 Qwixx 完全相同，另加一块（双面）图板"——玩家在板上推进自己的棋子、占据格子，终局按棋子所在格下方的分值获得**额外奖励分**（记分表底部多一个"图板分"栏）。据 [Opinionated Gamers 评测](https://opinionatedgamers.com/2019/12/12/dale-yu-review-of-qwixx-on-board/)：主动玩家回合可将棋子前移（跳过被占格），落点须与你已划/即划的数字对应；有人到达终点区最后 5 格时触发终局加一轮（其余细节，如移动步数上限与落格条件的确切表述，**未能取得官方 PDF 核实，标记为未证实**——NSV 官网规则下载页现已不再提供 On Board 的规则书）。基础的两步动作、锁行、失误规则保持不变。
+来自[官方英文规则 PDF](https://www.nsv.de/wp-content/uploads/2024/04/Qwixx_Double_GB.pdf)。两种版面都把锁行门槛从 5 提高到 **7 个叉**，单行最多按 16 个叉计 **136 分**：
 
-### 4.6 Qwixx X-Change（替换记分本扩展，NSV，约 2024）
+- **A**：每行最近划下的数字以后再次掷出时，可以在该格下方再划第二个叉；主动或非主动玩家均可。每个数字最多两个叉，第二叉不改变“最右位置”。
+- **B**：每行印有 4 个双倍格；命中时立即在同一格画两个叉。官方卡面位置为升序行 3/5/9/11、降序行 10/8/6/4。
+- 官方允许同局玩家分别选 A 或 B；两版按设计强度接近。
 
-NSV 官网规则页列有 [Qwixx X-Change 规则 PDF](https://www.nsv.de/wp-content/uploads/2024/09/QwixxXChange_EN.pdf)。从其卡面可见：仍是四行 2→12 / 12→2 布局与相同的三角数计分表，但部分格子印成**上下行交换/双数字格**的形式。规则 PDF 的文字层无法完整提取，具体划记规则**未证实**，实现前请直接查阅该 PDF 原文。
+### 4.6 Qwixx On Board（独立游戏，NSV，2019）
 
-### 4.7 其他相关官方产品（简述）
+[官方英文规则 PDF](https://www.nsv.de/wp-content/uploads/2025/06/QwixxOnBoard_GB.pdf)：2–4 人，约 20 分钟。原版两步动作外，主动玩家增加动作 3，向前移动 1–5 个空位；落点数字必须已在自己的表上划过，或在这次移动时按原规则划下。棋子位置终局提供 1–20 额外分。首名棋子进入最后 5 格后，其余玩家各再当一次主动玩家；原版的两行锁定/四次失误仍会立即结束游戏。由于它需要公共双面图板与棋子，不作为本项目的替换记分卡预设。
+
+### 4.7 Qwixx X-Change（替换记分本扩展，NSV，2024）
+
+来自[官方英文规则 PDF](https://www.nsv.de/wp-content/uploads/2024/09/QwixxXChange_EN.pdf)：卡下方新增 9 个有序交换格
+`8↔5, 9↔7, 11↔3, 7↔4, 10↔3, 8↔6, 10↔5, 11↔9, 6↔4`。动作 1 中主动玩家宣布白骰和后，每名玩家可为自己使用一个匹配的交换格，把和值换成另一端再按原规则划记。交换格从左到右使用，可跳过但不能回头；不会改变实体骰面，也不影响其他玩家。
+
+### 4.8 其他相关官方产品（简述）
 
 - **Qwixx: Das Kartenspiel（Qwixx 卡牌版）**：用牌库代替骰子，规则结构类似（[Gamewright 卡牌版规则 PDF](https://boardgame.bg/qwixx%20the%20card%20game%20rules.pdf)）；gemixxt 记分本可与卡牌版混用。
 - **Qwixx Das Duell / Qwixx Paarspiel** 等衍生亦存在，核心机制改动较大，未在本次调研范围内详查（未证实细节）。
@@ -244,7 +253,9 @@ NSV 官网规则页列有 [Qwixx X-Change 规则 PDF](https://www.nsv.de/wp-cont
 - Qwixx Big Points：https://www.nsv.de/wp-content/uploads/2024/04/QwixxBP_GB.pdf
 - Qwixx Bonus（版本 A/B）：https://www.nsv.de/wp-content/uploads/2024/04/Qwixx_Bonus_GB.pdf
 - Qwixx Connected（版本 A/B）：https://www.nsv.de/wp-content/uploads/2024/04/Qwixx_connect_GB.pdf
+- Qwixx Double（版本 A/B）：https://www.nsv.de/wp-content/uploads/2024/04/Qwixx_Double_GB.pdf
 - Qwixx X-Change：https://www.nsv.de/wp-content/uploads/2024/09/QwixxXChange_EN.pdf
+- Qwixx On Board：https://www.nsv.de/wp-content/uploads/2025/06/QwixxOnBoard_GB.pdf
 - NSV 规则下载总页：https://www.nsv.de/en/game-rules/
 
 **出版社/产品页**
@@ -258,4 +269,4 @@ NSV 官网规则页列有 [Qwixx X-Change 规则 PDF](https://www.nsv.de/wp-cont
 - 锁行/终局讨论帖：https://boardgamegeek.com/thread/1240674/locking-rows-and-game-ending
 - UltraBoardGames 规则转录：https://www.ultraboardgames.com/qwixx/game-rules.php
 
-**可靠性说明**：第 1、3 节及 4.1–4.4 逐句核对自官方规则 PDF 原文；4.5（On Board）与 4.6（X-Change）的部分细节未能取得可提取文本的官方规则，已标注"未证实"；FAQ 第 9 条是对官方"immediately"措辞的通行解读。
+**可靠性说明**：第 1、3 节及 4.1–4.7 均核对自官方规则 PDF；记分卡中仅靠图形表达的格位另以官方规则插图/产品卡面交叉核验。FAQ 第 9 条是对官方"immediately"措辞的通行解读。

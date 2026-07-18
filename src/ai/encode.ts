@@ -26,6 +26,9 @@ export interface ActionCodec {
 
 export function makeCodec(board: BoardDef): ActionCodec {
   const C = board.rows[0]!.cells.length;
+  const hasDouble = board.variant?.kind === 'double-a';
+  const hasForced = board.variant?.kind === 'bonus-a' || board.variant?.kind === 'bonus-b';
+  const swapCount = board.variant?.kind === 'x-change' ? board.variant.swaps.length : 0;
   const bonusSizes = (board.bonusRows ?? []).map((b) => b.numbers.length);
   const bonusOffsets: number[] = [];
   let B = 0;
@@ -33,13 +36,29 @@ export function makeCodec(board: BoardDef): ActionCodec {
     bonusOffsets.push(B);
     B += s;
   }
+  let cursor = 8 * C;
+  const markDoubleWhite = cursor;
+  if (hasDouble) cursor += 4 * C;
+  const markDoubleColor = cursor;
+  if (hasDouble) cursor += 4 * C;
+  const markWhiteExchange = cursor;
+  cursor += swapCount * 4 * C;
+  const markForced = cursor;
+  if (hasForced) cursor += 4 * C;
+  const markLucky = cursor; cursor += 4;
+  const markBonusWhite = cursor; cursor += B;
+  const markBonusColor = cursor; cursor += B;
   const base = {
     markColor: 4 * C,
-    markLucky: 8 * C,
-    markBonusWhite: 8 * C + 4,
-    markBonusColor: 8 * C + 4 + B,
-    skipWhite: 8 * C + 4 + 2 * B,
-    skipColor: 8 * C + 4 + 2 * B + 1,
+    markDoubleWhite,
+    markDoubleColor,
+    markWhiteExchange,
+    markForced,
+    markLucky,
+    markBonusWhite,
+    markBonusColor,
+    skipWhite: cursor,
+    skipColor: cursor + 1,
   };
   const numActions = base.skipColor + 1;
 
@@ -49,6 +68,14 @@ export function makeCodec(board: BoardDef): ActionCodec {
         return a.row * C + a.cell;
       case 'markColor':
         return base.markColor + a.row * C + a.cell;
+      case 'markDoubleWhite':
+        return base.markDoubleWhite + a.row * C + a.cell;
+      case 'markDoubleColor':
+        return base.markDoubleColor + a.row * C + a.cell;
+      case 'markWhiteExchange':
+        return base.markWhiteExchange + a.swap * 4 * C + a.row * C + a.cell;
+      case 'markForced':
+        return base.markForced + a.row * C + a.cell;
       case 'markLucky':
         return base.markLucky + a.row;
       case 'markBonusWhite':
@@ -72,9 +99,27 @@ export function makeCodec(board: BoardDef): ActionCodec {
   const indexToAction = (i: number): Action => {
     if (i < 0 || i >= numActions) throw new Error(`invalid action index ${i}`);
     if (i < base.markColor) return { type: 'markWhite', row: Math.floor(i / C), cell: i % C };
-    if (i < base.markLucky) {
+    if (i < 8 * C) {
       const j = i - base.markColor;
       return { type: 'markColor', row: Math.floor(j / C), cell: j % C };
+    }
+    if (hasDouble && i < base.markDoubleColor) {
+      const j = i - base.markDoubleWhite;
+      return { type: 'markDoubleWhite', row: Math.floor(j / C), cell: j % C };
+    }
+    if (hasDouble && i < base.markWhiteExchange) {
+      const j = i - base.markDoubleColor;
+      return { type: 'markDoubleColor', row: Math.floor(j / C), cell: j % C };
+    }
+    if (swapCount > 0 && i < base.markForced) {
+      const j = i - base.markWhiteExchange;
+      const swap = Math.floor(j / (4 * C));
+      const cellOffset = j % (4 * C);
+      return { type: 'markWhiteExchange', swap, row: Math.floor(cellOffset / C), cell: cellOffset % C };
+    }
+    if (hasForced && i < base.markLucky) {
+      const j = i - base.markForced;
+      return { type: 'markForced', row: Math.floor(j / C), cell: j % C };
     }
     if (i < base.markBonusWhite) return { type: 'markLucky', row: i - base.markLucky };
     if (i < base.markBonusColor) return { type: 'markBonusWhite', ...bonusFromOffset(i - base.markBonusWhite) };
@@ -104,7 +149,16 @@ export function legalActionMask(state: GameState, codec: ActionCodec): Uint8Arra
 export function observationSize(config: RulesConfig, maxPlayers = 5): number {
   const C = config.board.rows[0]!.cells.length;
   const B = (config.board.bonusRows ?? []).reduce((a, b) => a + b.numbers.length, 0);
-  return maxPlayers * (4 * C + B + 1) + 4 + 4 + 2 + 4 + 4 + 1 + 2 + 1 + 1 + 2;
+  const V = variantFeatureSize(config.board);
+  return maxPlayers * (8 * C + B + V + 1) + 4 + 4 + 2 + 4 + 4 + 1 + 3 + 1 + 1 + 2;
+}
+
+function variantFeatureSize(board: BoardDef): number {
+  const variant = board.variant;
+  if (variant?.kind === 'bonus-a') return variant.rewardTrack.length;
+  if (variant?.kind === 'bonus-b') return 5;
+  if (variant?.kind === 'x-change') return variant.swaps.length;
+  return 0;
 }
 
 export function encodeObservation(state: GameState, viewer: number, maxPlayers = 5): Float32Array {
@@ -112,6 +166,7 @@ export function encodeObservation(state: GameState, viewer: number, maxPlayers =
   const n = config.numPlayers;
   const C = config.board.rows[0]!.cells.length;
   const B = (config.board.bonusRows ?? []).reduce((a, b) => a + b.numbers.length, 0);
+  const V = variantFeatureSize(config.board);
   const maxSum = 2 * config.dieFaces;
   const obs = new Float32Array(observationSize(config, maxPlayers));
   let o = 0;
@@ -121,10 +176,23 @@ export function encodeObservation(state: GameState, viewer: number, maxPlayers =
       for (let r = 0; r < 4; r++) {
         for (let c = 0; c < C; c++) obs[o++] = p.marks[r]![c] ? 1 : 0;
       }
+      for (let r = 0; r < 4; r++) {
+        for (let c = 0; c < C; c++) obs[o++] = p.secondMarks[r]![c] ? 1 : 0;
+      }
       for (const bm of p.bonusMarks) for (const m of bm) obs[o++] = m ? 1 : 0;
+      if (config.board.variant?.kind === 'bonus-a') {
+        for (const used of p.variantState.bonusTrackUsed!) obs[o++] = used ? 1 : 0;
+      } else if (config.board.variant?.kind === 'bonus-b') {
+        for (const symbol of ['circle', 'diamond', 'square', 'octagon', 'star'] as const) {
+          obs[o++] = p.variantState.bonusSymbols?.[symbol] ? 1 : 0;
+        }
+      } else if (config.board.variant?.kind === 'x-change') {
+        const through = p.variantState.xChangeThrough ?? -1;
+        for (let swap = 0; swap < config.board.variant.swaps.length; swap++) obs[o++] = swap <= through ? 1 : 0;
+      }
       obs[o++] = p.penalties / config.maxPenalties;
     } else {
-      o += 4 * C + B + 1;
+      o += 8 * C + B + V + 1;
     }
   }
   for (let r = 0; r < 4; r++) obs[o++] = state.lockedRows[r] ? 1 : 0;
@@ -136,6 +204,7 @@ export function encodeObservation(state: GameState, viewer: number, maxPlayers =
   obs[o++] = whiteSum(state) / maxSum;
   obs[o++] = state.phase === 'whiteChoice' ? 1 : 0;
   obs[o++] = state.phase === 'colorChoice' ? 1 : 0;
+  obs[o++] = state.phase === 'bonusChoice' ? 1 : 0;
   obs[o++] = state.activePlayer === viewer ? 1 : 0;
   obs[o++] = currentActor(state) === viewer ? 1 : 0;
   const lucky = config.luckyNumbers?.[viewer] ?? [];

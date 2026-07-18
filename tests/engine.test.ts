@@ -15,6 +15,14 @@ import {
   GEMIXXT_B_BOARD,
   LONGO_BOARD,
   BIG_POINTS_BOARD,
+  DOUBLE_A_BOARD,
+  DOUBLE_B_BOARD,
+  BONUS_A_BOARD,
+  BONUS_B_BOARD,
+  CONNECTED_STEPS_BOARD,
+  CONNECTED_CHAIN_BOARD,
+  X_CHANGE_BOARD,
+  BOARD_PRESETS,
   randomMixedBoard,
   validateBoard,
 } from '../src/core/board';
@@ -34,14 +42,131 @@ function setDice(state: GameState, white: [number, number], colors: Partial<Reco
 
 describe('棋盘定义', () => {
   it('内置棋盘均通过校验', () => {
-    validateBoard(CLASSIC_BOARD);
-    validateBoard(GEMIXXT_A_BOARD);
-    validateBoard(GEMIXXT_B_BOARD);
+    for (const board of Object.values(BOARD_PRESETS)) validateBoard(board);
     validateBoard(randomMixedBoard(7));
   });
+
+  it('Connected B 每张卡的五对连线端点互不冲突', () => {
+    const variant = CONNECTED_CHAIN_BOARD.variant;
+    if (variant?.kind !== 'connected-chain') throw new Error('invalid chain fixture');
+    for (const sheet of variant.sheets) {
+      const endpoints = sheet.flat().map((ref) => `${ref.row}:${ref.cell}`);
+      expect(sheet).toHaveLength(5);
+      expect(new Set(endpoints).size).toBe(10);
+    }
+  });
+
   it('随机棋盘可复现', () => {
     expect(randomMixedBoard(5)).toEqual(randomMixedBoard(5));
     expect(randomMixedBoard(5)).not.toEqual(randomMixedBoard(6));
+  });
+});
+
+describe('官方追加记分卡变体', () => {
+  it('Longo 按官方积分表每行最多计 15 个划记', () => {
+    const s = newGame(configForBoard(LONGO_BOARD, 1, 1));
+    s.players[0]!.marks[0]!.fill(true);
+    const score = computeScore(s, 0);
+    expect(score.groupCounts[0]).toBe(15);
+    expect(score.groupPoints[0]).toBe(120);
+  });
+
+  it('Double A 可把每行最近格再划一次，并计入锁行门槛与得分', () => {
+    const s = newGame(configForBoard(DOUBLE_A_BOARD, 1, 1));
+    for (const cell of [0, 1, 2]) s.players[0]!.marks[0]![cell] = true;
+    setDice(s, [2, 2], { red: 2 }); // 白骰和 4 = 红行最近格
+    expect(legalActions(s)).toContainEqual({ type: 'markDoubleWhite', row: 0, cell: 2 });
+    const next = applyAction(s, { type: 'markDoubleWhite', row: 0, cell: 2 });
+    expect(next.players[0]!.secondMarks[0]![2]).toBe(true);
+    expect(computeScore(next, 0).groupCounts[0]).toBe(4);
+    expect(next.config.minMarksToLock).toBe(7);
+  });
+
+  it('Double B 的官方乘数格一次计两个叉', () => {
+    const s = newGame(configForBoard(DOUBLE_B_BOARD, 1, 1));
+    setDice(s, [1, 2], { red: 1 }); // 红3（index 1）是双倍格
+    const next = applyAction(s, { type: 'markWhite', row: 0, cell: 1 });
+    expect(next.players[0]!.secondMarks[0]![1]).toBe(true);
+    expect(computeScore(next, 0).groupCounts[0]).toBe(2);
+  });
+
+  it('X-Change 只能按顺序向右使用，并交换白骰和值', () => {
+    const s = newGame(configForBoard(X_CHANGE_BOARD, 1, 1));
+    setDice(s, [5, 6], { red: 1 }); // 11 可用第 3 格交换成 3
+    expect(legalActions(s)).toContainEqual({ type: 'markWhiteExchange', row: 0, cell: 1, swap: 2 });
+    const next = applyAction(s, { type: 'markWhiteExchange', row: 0, cell: 1, swap: 2 });
+    expect(next.players[0]!.variantState.xChangeThrough).toBe(2);
+    expect(next.players[0]!.marks[0]![1]).toBe(true);
+  });
+
+  it('Bonus A 命中奖励格后暂停原动作并强制完成颜色轨追加划记', () => {
+    const s = newGame(configForBoard(BONUS_A_BOARD, 1, 1));
+    setDice(s, [1, 2], { red: 1 }); // 红3 是奖励触发格
+    const pending = applyAction(s, { type: 'markWhite', row: 0, cell: 1 });
+    expect(pending.phase).toBe('bonusChoice');
+    expect(pending.players[0]!.variantState.bonusTrackUsed![0]).toBe(true);
+    expect(legalActions(pending).every((action) => action.type === 'markForced' && action.row === 0)).toBe(true);
+    const resumed = applyAction(pending, { type: 'markForced', row: 0, cell: 2 });
+    expect(resumed.phase).toBe('colorChoice');
+    expect(resumed.players[0]!.marks[0]![2]).toBe(true);
+  });
+
+  it('Bonus B 凑齐菱形后依次在四行强制追加一格', () => {
+    let s = newGame(configForBoard(BONUS_B_BOARD, 1, 1));
+    s.players[0]!.marks[1]![5] = true; // 黄7（菱形）
+    setDice(s, [1, 6], { blue: 1 });
+    s = applyAction(s, { type: 'markWhite', row: 3, cell: 5 }); // 蓝7（另一菱形）
+    expect(s.phase).toBe('bonusChoice');
+    expect(s.players[0]!.variantState.bonusSymbols?.diamond).toBe(true);
+    for (let row = 0; row < 4; row++) {
+      const action = legalActions(s).find((candidate) => candidate.type === 'markForced' && candidate.row === row);
+      expect(action).toBeDefined();
+      s = applyAction(s, action!);
+    }
+    expect(s.phase).toBe('colorChoice');
+  });
+
+  it('Bonus B 结算翻倍、+13 与失误免扣分', () => {
+    const s = newGame(configForBoard(BONUS_B_BOARD, 1, 1));
+    [1, 2, 3, 4].forEach((count, row) => {
+      for (let cell = 0; cell < count; cell++) s.players[0]!.marks[row]![cell] = true;
+    });
+    s.players[0]!.penalties = 2;
+    s.players[0]!.variantState.bonusSymbols = { square: true, octagon: true, star: true };
+    const score = computeScore(s, 0);
+    expect(score.groupPoints).toEqual([2, 3, 6, 10]);
+    expect(score.variantBonusPoints).toBe(13);
+    expect(score.penaltyPoints).toBe(0);
+    expect(score.total).toBe(34);
+  });
+
+  it('Connected 阶梯增加第五计分组，连锁自动划下另一端', () => {
+    const steps = newGame(configForBoard(CONNECTED_STEPS_BOARD, 1, 1));
+    const stepVariant = CONNECTED_STEPS_BOARD.variant;
+    if (stepVariant?.kind !== 'connected-steps') throw new Error('invalid steps fixture');
+    const stepSheet = stepVariant.sheets[0]!;
+    for (const ref of stepSheet) steps.players[0]!.marks[ref.row]![ref.cell] = true;
+    const stepScore = computeScore(steps, 0);
+    expect(stepScore.groupCounts[4]).toBe(11);
+    expect(stepScore.groupPoints[4]).toBe(66);
+
+    const chain = newGame(configForBoard(CONNECTED_CHAIN_BOARD, 1, 1));
+    const chainVariant = CONNECTED_CHAIN_BOARD.variant;
+    if (chainVariant?.kind !== 'connected-chain') throw new Error('invalid chain fixture');
+    const pair = chainVariant.sheets[0]![0]!;
+    const first = pair[0]!;
+    const number = chain.config.board.rows[first.row]!.cells[first.cell]!.number;
+    setDice(chain, [1, number - 1], {});
+    const linked = applyAction(chain, { type: 'markWhite', ...first });
+    const second = pair[1]!;
+    expect(linked.players[0]!.marks[second.row]![second.cell]).toBe(true);
+  });
+
+  it('新增变体动作编解码可逆', () => {
+    for (const board of [DOUBLE_A_BOARD, DOUBLE_B_BOARD, BONUS_A_BOARD, BONUS_B_BOARD, CONNECTED_STEPS_BOARD, CONNECTED_CHAIN_BOARD, X_CHANGE_BOARD]) {
+      const codec = makeCodec(board);
+      for (let i = 0; i < codec.numActions; i++) expect(codec.actionToIndex(codec.indexToAction(i))).toBe(i);
+    }
   });
 });
 

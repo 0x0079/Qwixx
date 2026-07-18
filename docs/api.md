@@ -26,6 +26,7 @@ interface BoardDef {
   bonusRows?: BonusRowDef[];      // 奖励行（Big Points）
   rulesOverrides?: Partial<Pick<RulesConfig, 'dieFaces' | 'minMarksToLock'>>;
   luckyNumbers?: boolean;         // 是否启用幸运数字（Longo）
+  variant?: BoardVariant;         // Double / Bonus / Connected / X-Change 元数据
 }
 
 interface RulesConfig {
@@ -42,12 +43,12 @@ interface RulesConfig {
 
 interface GameState {
   config: RulesConfig;
-  players: { marks: boolean[][]; bonusMarks: boolean[][]; penalties: number }[];
+  players: { marks: boolean[][]; secondMarks: boolean[][]; bonusMarks: boolean[][]; variantState: object; penalties: number }[];
   lockedRows: boolean[];
   removedColors: Color[];
   activePlayer: number;
   dice: { white: [number, number]; colors: Partial<Record<Color, number>> };
-  phase: 'whiteChoice' | 'colorChoice' | 'gameOver';
+  phase: 'whiteChoice' | 'colorChoice' | 'bonusChoice' | 'gameOver';
   whiteQueue: number[];           // 白骰窗口中尚未决策的玩家（队首为当前决策者）
   activeMarked: boolean;
   turn: number;
@@ -58,11 +59,15 @@ interface GameState {
 
 type Action =
   | { type: 'markWhite'; row: number; cell: number }     // 动作 1：白骰和
+  | { type: 'markDoubleWhite'; row: number; cell: number }
+  | { type: 'markWhiteExchange'; row: number; cell: number; swap: number }
   | { type: 'markLucky'; row: number }                   // 动作 1：幸运数字（Longo）
   | { type: 'markBonusWhite'; bonus: number; cell: number } // 动作 1：奖励格（Big Points）
   | { type: 'skipWhite' }
   | { type: 'markColor'; row: number; cell: number }     // 动作 2：白 + 彩
+  | { type: 'markDoubleColor'; row: number; cell: number }
   | { type: 'markBonusColor'; bonus: number; cell: number } // 动作 2：奖励格
+  | { type: 'markForced'; row: number; cell: number }    // Bonus A/B 强制追加
   | { type: 'skipColor' };
 ```
 
@@ -88,12 +93,16 @@ whiteChoice（whiteQueue 依次决策：markWhite | markLucky | markBonusWhite |
   └─ 队列清空 → 锁定结算(resolveLocks) → 终局? → colorChoice
 colorChoice（仅主动玩家：markColor | markBonusColor | skipColor）
   └─ 失误判定 → 锁定结算 → 终局? → 下一回合
+bonusChoice（Bonus A/B 暂停原动作：markForced）
+  └─ 强制效果队列清空 → 恢复并完成原 whiteChoice / colorChoice
 ```
 
 ## 棋盘（src/core/board.ts）
 
 ```ts
-BOARD_PRESETS: { classic, 'gemixxt-a', 'gemixxt-b', longo, 'big-points' }
+BOARD_PRESETS: { classic, 'gemixxt-a', 'gemixxt-b', longo, 'big-points',
+  'double-a', 'double-b', 'bonus-a', 'bonus-b', 'connected-steps',
+  'connected-chain', 'x-change' }
 randomMixedBoard(seed): BoardDef   // 随机混排生成器（非官方）
 validateBoard(board): void          // 结构校验，不合法抛错
 ```
@@ -105,7 +114,7 @@ validateBoard(board): void          // 结构校验，不合法抛错
 
 ```ts
 pointsForCount(n)                 // n(n+1)/2
-computeScore(state, player)       // => ScoreBreakdown { groupCounts, groupPoints, groupLabels, penalties, penaltyPoints, total }
+computeScore(state, player)       // => ScoreBreakdown（含 variantBonusPoints）
 effectiveRowCount(state, player, row)  // 行划记数 + 奖励格贡献（封顶前），供 AI 估值
 ```
 

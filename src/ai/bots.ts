@@ -64,10 +64,11 @@ function evaluateMark(
 
   const row = action.row;
   const cell = action.type === 'markLucky' ? rightmostMark(state, player, row) + 1 : action.cell;
-  const skipped = action.type === 'markLucky' ? 0 : cell - rightmostMark(state, player, row) - 1;
+  const isSecond = action.type === 'markDoubleWhite' || action.type === 'markDoubleColor';
+  const skipped = action.type === 'markLucky' || isSecond ? 0 : cell - rightmostMark(state, player, row) - 1;
   const count = groupCount(state, player, row, cell);
   const tail = board.lockableTail ?? 1;
-  const isLock = cell >= board.rows[row]!.cells.length - tail;
+  const isLock = !isSecond && cell >= board.rows[row]!.cells.length - tail;
   // 边际得分：第 n+1 个划记价值 n+1 分；锁定格额外再 +1 个计数（再 +n+2 分）。
   const gain = count + 1 + (isLock ? count + 2 : 0);
   return { gain, skipped, locks: isLock };
@@ -144,7 +145,7 @@ export class HeuristicBot implements Bot {
     const locks = state.lockedRows.filter(Boolean).length / state.config.locksToEnd;
     const pen = Math.max(...state.players.map((p) => p.penalties)) / state.config.maxPenalties;
     const marks =
-      Math.max(...state.players.map((p) => p.marks.flat().filter(Boolean).length)) / (cells * 0.68);
+      Math.max(...state.players.map((p) => p.marks.flat().filter(Boolean).length + p.secondMarks.flat().filter(Boolean).length)) / (cells * 0.68);
     return Math.min(1, Math.max(locks, pen, marks));
   }
 
