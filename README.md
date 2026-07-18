@@ -11,7 +11,8 @@
   动作 1 后立即终局检查、锁定格计分 +1、自愿失误等，详见 `docs/rules-research.md`）。
 - **多版本记分卡**：经典 / gemixxt 变体 A（混色·数字有序）/ gemixxt 变体 B（单色·数字乱序）/
   **Qwixx Longo**（2–16 长行、八面骰、双锁定格、幸运数字）/
-  **Qwixx Big Points**（双色奖励行、每行封顶 15 计数）/ 随机混排生成器；
+  **Big Points** / **Double A/B** / **Bonus A/B** / **Connected 阶梯/连锁** /
+  **X-Change**，共 12 个官方预设，另有随机混排生成器；
   失误上限、锁行门槛、骰面数等规则参数均可配置。
 - **AI 机器人**（`src/ai`）：random / greedy / heuristic 三档基线，统一 `Bot` 接口，
   全部支持上述所有变体（含幸运数字与奖励格动作估值）。
@@ -45,7 +46,7 @@ npm run build      # 类型检查 + 生产构建（dist/ 为纯静态站点）
 
 | 文档 | 内容 |
 |---|---|
-| [`docs/manual.md`](docs/manual.md) | 玩家手册：通用规则、六种记分卡变体的完整规则、界面操作、FAQ |
+| [`docs/manual.md`](docs/manual.md) | 玩家手册：通用规则、全部官方记分卡变体、界面操作、FAQ |
 | [`docs/api.md`](docs/api.md) | 开发者参考：核心类型、引擎/棋盘/计分/机器人/RL 编码 API、竞技场 CLI 参数 |
 | [`docs/training.md`](docs/training.md) | AI 训练指南：任务形式化、在线自对弈与离线 JSONL 两条路线、策略接入与基线成绩 |
 | [`docs/design.md`](docs/design.md) | 架构设计：状态机、关键规则裁定、变体支持矩阵 |
