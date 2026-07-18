@@ -624,9 +624,11 @@ function DicePanel({ game }: { game: GameState }) {
       <div className="dice-group white-dice-group">
         <div className="dice-label"><span>公共骰</span><strong>所有玩家可用</strong></div>
         <div className="dice-pair">
-          {game.dice.white.map((value, i) => <Die key={`w${i}`} value={value} color="white" />)}
-          <span className="sum-sign">=</span>
           <span className="sum-card"><small>白骰和</small><strong>{whiteSum(game)}</strong></span>
+          <span className="sum-sign" aria-hidden="true">=</span>
+          <Die value={game.dice.white[0]} color="white" />
+          <span className="sum-sign" aria-hidden="true">+</span>
+          <Die value={game.dice.white[1]} color="white" />
         </div>
       </div>
       <div className="dice-divider" />
