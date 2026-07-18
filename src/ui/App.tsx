@@ -10,7 +10,7 @@ import {
   configForBoard,
 } from '../core/engine';
 import { BOARD_PRESETS, randomMixedBoard } from '../core/board';
-import { computeScore } from '../core/scoring';
+import { computeScore, pointsForCount } from '../core/scoring';
 import { BOT_REGISTRY, makeRand, type Bot } from '../ai/bots';
 
 type PlayerKind = 'human' | 'random' | 'greedy' | 'heuristic';
@@ -643,6 +643,8 @@ function GameScreen({ game, setGame, setup, log, setLog, onExit, onRestart }: {
         )}
       </section>
 
+      <ScoreReference game={game} />
+
       <div className="sr-only" aria-live="polite">{log.at(-1) ?? ''}</div>
 
       {showExitConfirm && (
@@ -665,6 +667,73 @@ function GameScreen({ game, setGame, setup, log, setLog, onExit, onRestart }: {
         </div>
       )}
     </main>
+  );
+}
+
+function ScoreReference({ game }: { game: GameState }) {
+  const board = game.config.board;
+  const maxCount = board.scoreCap ?? 12;
+  const counts = Array.from({ length: maxCount }, (_, index) => index + 1);
+  const notes = [
+    '锁定符号计作 1 个额外划记。',
+    `每次失误扣 ${game.config.penaltyPoints} 分。`,
+  ];
+
+  if (board.id === 'longo') {
+    notes.push('Longo 每行最多计 15 个划记（120 分）。');
+  }
+  if (board.bonusRows?.length) {
+    notes.push('双色奖励格同时计入相邻两行；每行最多计 15 个划记。');
+  }
+
+  switch (board.variant?.kind) {
+    case 'double-a':
+      notes.push('第二叉照常计分；每行最多计 16 个划记（136 分）。');
+      break;
+    case 'double-b':
+      notes.push('×2 格一次计作两个划记；每行最多计 16 个划记（136 分）。');
+      break;
+    case 'bonus-a':
+      notes.push('奖励轨追加的划记按所在颜色行正常计分。');
+      break;
+    case 'bonus-b':
+      notes.push('○/◇追加叉正常计分；□将最低行分翻倍；⬡ +13 分；✹免除失误扣分。');
+      break;
+    case 'connected-steps':
+      notes.push('11 个阶梯格另组成一个计分组，沿用本表，最高 66 分。');
+      break;
+    case 'connected-chain':
+      notes.push('自动连锁划下的格子按所在颜色行正常计分。');
+      break;
+    case 'x-change':
+      notes.push('交换只改变可划的白骰和值，不改变计分方式。');
+      break;
+  }
+
+  return (
+    <section className="score-reference" aria-labelledby="score-reference-title">
+      <div className="score-reference-heading">
+        <div><Icon name="chart" /><h2 id="score-reference-title">本局积分表</h2></div>
+        <span>{board.name}</span>
+      </div>
+      <div className="score-reference-scroll" tabIndex={0} aria-label="积分表，可横向滚动">
+        <table>
+          <tbody>
+            <tr>
+              <th scope="row">划记数</th>
+              {counts.map((count) => <td key={count}>{count}</td>)}
+            </tr>
+            <tr>
+              <th scope="row">得分</th>
+              {counts.map((count) => <td key={count}><strong>{pointsForCount(count)}</strong></td>)}
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <ul className="score-reference-notes">
+        {notes.map((note) => <li key={note}>{note}</li>)}
+      </ul>
+    </section>
   );
 }
 
@@ -958,7 +1027,7 @@ function BrandMark({ compact = false }: { compact?: boolean }) {
 
 type IconName = 'plus' | 'trash' | 'check' | 'repeat' | 'shuffle' | 'sparkles' | 'arrow'
   | 'book' | 'chevron' | 'lock' | 'exit' | 'target' | 'bot' | 'skip' | 'trophy'
-  | 'history' | 'flag';
+  | 'history' | 'flag' | 'chart';
 
 function Icon({ name }: { name: IconName }) {
   const paths: Record<IconName, ReactNode> = {
@@ -979,6 +1048,7 @@ function Icon({ name }: { name: IconName }) {
     trophy: <><path d="M8 4h8v5a4 4 0 0 1-8 0V4ZM10 15h4M12 13v6M8 21h8" /><path d="M8 6H4v2a4 4 0 0 0 4 4M16 6h4v2a4 4 0 0 1-4 4" /></>,
     history: <><path d="M3 12a9 9 0 1 0 3-6.7L3 8" /><path d="M3 3v5h5M12 7v5l3 2" /></>,
     flag: <><path d="M6 22V4" /><path d="M6 5h10l-2 4 2 4H6" /></>,
+    chart: <><path d="M4 20V10M10 20V4M16 20v-7M22 20H2" /></>,
   };
   return <svg className="icon" viewBox="0 0 24 24" aria-hidden="true">{paths[name]}</svg>;
 }

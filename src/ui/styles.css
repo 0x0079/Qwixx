@@ -678,6 +678,22 @@ summary:focus-visible,
 .log-list li.latest { color: var(--ink); font-weight: 650; }
 .log-list li.latest > span { background: var(--green-soft); color: var(--green); }
 
+.score-reference { margin-top: 15px; padding: 16px 18px; border: 1px solid #dcd8ce; border-radius: 16px; background: rgba(255, 253, 248, 0.92); box-shadow: var(--shadow-sm); }
+.score-reference-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.score-reference-heading > div { display: flex; align-items: center; gap: 8px; }
+.score-reference-heading .icon { color: var(--green); }
+.score-reference-heading h2 { margin: 0; font-size: 13px; }
+.score-reference-heading > span { overflow: hidden; color: #969c97; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.score-reference-scroll { margin-top: 12px; overflow-x: auto; border: 1px solid #e5e1d8; border-radius: 10px; scrollbar-width: thin; scrollbar-color: #c8cbc6 transparent; }
+.score-reference table { width: 100%; min-width: 680px; border-spacing: 0; table-layout: fixed; background: #fffefa; }
+.score-reference th, .score-reference td { min-width: 39px; padding: 8px 5px; border-left: 1px solid #ece8df; text-align: center; font-size: 9px; }
+.score-reference th { position: sticky; left: 0; z-index: 1; width: 62px; border-left: 0; background: #f1efe9; color: #6f7771; font-weight: 750; }
+.score-reference tr + tr > * { border-top: 1px solid #e5e1d8; }
+.score-reference td { color: #858d87; }
+.score-reference td strong { color: var(--ink); font-size: 11px; }
+.score-reference-notes { display: flex; flex-wrap: wrap; gap: 7px; margin: 10px 0 0; padding: 0; list-style: none; }
+.score-reference-notes li { padding: 5px 8px; border-radius: 7px; background: #f1f5ef; color: #667069; font-size: 9px; line-height: 1.4; }
+
 .game-over-panel { display: flex; align-items: center; gap: 19px; padding: 24px 26px; border: 1px solid #d7c47a; border-radius: 18px; background: linear-gradient(110deg, #fff9df, #fffdf7); box-shadow: var(--shadow-md); }
 .trophy { width: 61px; height: 61px; display: grid; place-items: center; flex: 0 0 auto; border-radius: 18px; background: #f2c84d; color: #704f00; transform: rotate(-3deg); }
 .trophy .icon { width: 30px; height: 30px; }
@@ -770,6 +786,10 @@ summary:focus-visible,
   .game-over-copy { width: calc(100% - 80px); }
   .game-over-actions { width: 100%; margin: 0; }
   .game-over-actions > button { flex: 1; }
+  .score-reference { padding: 14px; }
+  .score-reference-heading { align-items: flex-start; }
+  .score-reference-heading > span { max-width: 48%; }
+  .score-reference-notes { display: grid; }
 }
 
 @media (max-width: 420px) {

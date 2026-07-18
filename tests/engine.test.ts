@@ -63,6 +63,14 @@ describe('棋盘定义', () => {
 });
 
 describe('官方追加记分卡变体', () => {
+  it('Longo 按官方积分表每行最多计 15 个划记', () => {
+    const s = newGame(configForBoard(LONGO_BOARD, 1, 1));
+    s.players[0]!.marks[0]!.fill(true);
+    const score = computeScore(s, 0);
+    expect(score.groupCounts[0]).toBe(15);
+    expect(score.groupPoints[0]).toBe(120);
+  });
+
   it('Double A 可把每行最近格再划一次，并计入锁行门槛与得分', () => {
     const s = newGame(configForBoard(DOUBLE_A_BOARD, 1, 1));
     for (const cell of [0, 1, 2]) s.players[0]!.marks[0]![cell] = true;

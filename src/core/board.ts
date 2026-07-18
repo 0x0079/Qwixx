@@ -99,6 +99,7 @@ export const LONGO_BOARD: BoardDef = {
   name: 'Qwixx Longo（2–16 · 八面骰 · 幸运数字）',
   rows: [row('red', LONGO_ASC), row('yellow', LONGO_ASC), row('green', LONGO_DESC), row('blue', LONGO_DESC)],
   scoreBy: 'row',
+  scoreCap: 15,
   lockableTail: 2,
   luckyNumbers: true,
   rulesOverrides: { dieFaces: 8, minMarksToLock: 6 },
