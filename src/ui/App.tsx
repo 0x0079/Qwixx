@@ -282,37 +282,6 @@ function SetupScreen({ setup, setSetup, onStart }: {
             </div>
           </section>
 
-          <section className="panel seed-panel" aria-labelledby="seed-title">
-            <div className="seed-copy">
-              <span className="seed-icon" aria-hidden="true"><Icon name="repeat" /></span>
-              <div>
-                <h2 id="seed-title">可复现的随机局</h2>
-                <p>保留种子即可重现相同骰序，适合复盘或比较 AI 策略。</p>
-              </div>
-            </div>
-            <div className="seed-control">
-              <label htmlFor="game-seed">随机种子</label>
-              <div>
-                <input
-                  id="game-seed"
-                  type="number"
-                  value={setup.seed}
-                  placeholder="留空则每局随机"
-                  step="1"
-                  onChange={(e) => setSetup({ ...setup, seed: e.target.value })}
-                />
-                <button
-                  type="button"
-                  className="icon-button"
-                  title="生成新种子"
-                  aria-label="生成新随机种子"
-                  onClick={() => setSetup({ ...setup, seed: String(randomSeed()) })}
-                >
-                  <Icon name="shuffle" />
-                </button>
-              </div>
-            </div>
-          </section>
         </div>
 
         <aside className="setup-aside">
@@ -335,6 +304,36 @@ function SetupScreen({ setup, setSetup, onStart }: {
                   <em>{KIND_SHORT[player.kind]}</em>
                 </div>
               ))}
+            </div>
+
+            <div className="start-seed">
+              <div className="start-seed-heading">
+                <label htmlFor="game-seed">随机种子 <span>可选</span></label>
+                <small>{setup.seed ? `固定复现 #${setup.seed}` : '每次开始自动生成'}</small>
+              </div>
+              <div className="seed-entry">
+                <input
+                  id="game-seed"
+                  type="number"
+                  value={setup.seed}
+                  aria-describedby="seed-hint"
+                  placeholder="留空则每局随机"
+                  step="1"
+                  onChange={(e) => setSetup({ ...setup, seed: e.target.value })}
+                />
+                <button
+                  type="button"
+                  className="icon-button"
+                  title="生成可复现种子"
+                  aria-label="生成可复现随机种子"
+                  onClick={() => setSetup({ ...setup, seed: String(randomSeed()) })}
+                >
+                  <Icon name="shuffle" />
+                </button>
+              </div>
+              <p id="seed-hint">
+                {setup.seed ? '使用这个数字即可重现同一骰序。' : '保持留空，每次开始都会是新局。'}
+              </p>
             </div>
 
             <button className="primary start-button" type="button" disabled={blankNames} onClick={onStart}>
@@ -480,7 +479,8 @@ function GameScreen({ game, setGame, setup, log, setLog, onExit, onRestart }: {
           <strong>第 {game.turn} 回合</strong>
         </div>
         <div className="game-meta">
-          <span><Icon name="lock" /> {lockedCount} / {game.config.locksToEnd} 行锁定</span>
+          <span className="seed-meta" title={`本局随机种子：${game.config.seed}`}><Icon name="shuffle" /> 种子 {game.config.seed}</span>
+          <span className="lock-meta"><Icon name="lock" /> {lockedCount} / {game.config.locksToEnd} 行锁定</span>
           <button type="button" className="ghost-button" onClick={() => setShowExitConfirm(true)}>
             <Icon name="exit" /> 退出对局
           </button>
