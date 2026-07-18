@@ -1,4 +1,4 @@
-import type { BoardDef, Cell, Color, RowDef } from './types';
+import type { BoardDef, Cell, CellRef, Color, RowDef } from './types';
 import { COLORS } from './types';
 import { nextRand } from './rng';
 
@@ -122,12 +122,132 @@ export const BIG_POINTS_BOARD: BoardDef = {
   ],
 };
 
+/** Qwixx Double A: the rightmost crossed number may be crossed a second time. */
+export const DOUBLE_A_BOARD: BoardDef = {
+  id: 'double-a',
+  name: 'Qwixx Double A（最近格可再划）',
+  rows: [row('red', ASC), row('yellow', ASC), row('green', DESC), row('blue', DESC)],
+  scoreBy: 'row',
+  scoreCap: 16,
+  rulesOverrides: { minMarksToLock: 7 },
+  variant: { kind: 'double-a' },
+};
+
+/** Qwixx Double B: the printed 3/5/9/11 (or 10/8/6/4) cells count twice. */
+export const DOUBLE_B_BOARD: BoardDef = {
+  id: 'double-b',
+  name: 'Qwixx Double B（四个双倍格）',
+  rows: [row('red', ASC), row('yellow', ASC), row('green', DESC), row('blue', DESC)],
+  scoreBy: 'row',
+  scoreCap: 16,
+  rulesOverrides: { minMarksToLock: 7 },
+  variant: { kind: 'double-b', multiplierCells: [1, 3, 7, 9] },
+};
+
+const refs = (entries: [number, number][]): CellRef[] => entries.map(([row, cell]) => ({ row, cell }));
+
+/** Qwixx Bonus A official trigger cells and twelve-colour reward track. */
+export const BONUS_A_BOARD: BoardDef = {
+  id: 'bonus-a',
+  name: 'Qwixx Bonus A（连锁奖励）',
+  rows: [row('red', ASC), row('yellow', ASC), row('green', DESC), row('blue', DESC)],
+  scoreBy: 'row',
+  variant: {
+    kind: 'bonus-a',
+    triggerCells: refs([
+      [0, 1], [0, 4], [0, 7],
+      [1, 3], [1, 6], [1, 9],
+      [2, 1], [2, 5], [2, 8],
+      [3, 2], [3, 4], [3, 7],
+    ]),
+    rewardTrack: ['red', 'yellow', 'green', 'blue', 'green', 'red', 'blue', 'yellow', 'red', 'yellow', 'blue', 'green'],
+  },
+};
+
+/** Qwixx Bonus B official paired symbols. */
+export const BONUS_B_BOARD: BoardDef = {
+  id: 'bonus-b',
+  name: 'Qwixx Bonus B（成对符号）',
+  rows: [row('red', ASC), row('yellow', ASC), row('green', DESC), row('blue', DESC)],
+  scoreBy: 'row',
+  variant: {
+    kind: 'bonus-b',
+    symbols: {
+      circle: [{ row: 1, cell: 9 }, { row: 2, cell: 3 }],
+      diamond: [{ row: 1, cell: 5 }, { row: 3, cell: 5 }],
+      square: [{ row: 0, cell: 6 }, { row: 3, cell: 2 }],
+      octagon: [{ row: 0, cell: 4 }, { row: 3, cell: 8 }],
+      star: [{ row: 1, cell: 1 }, { row: 2, cell: 7 }],
+    },
+  },
+};
+
+/*
+ * Connected pads contain five different A-E sheets. The digital sheets keep the
+ * official invariant (eleven step cells / five linked pairs per player) and rotate
+ * the printed pattern by seat, so hot-seat players always receive different cards.
+ */
+const STEP_PATTERNS = [
+  [0, 1, 1, 0, 2, 3, 3, 2, 0, 1, 2],
+  [1, 0, 2, 3, 1, 2, 0, 3, 2, 3, 1],
+  [2, 3, 0, 1, 3, 0, 2, 1, 3, 0, 2],
+  [3, 2, 1, 0, 2, 1, 3, 0, 1, 2, 3],
+  [0, 2, 3, 1, 0, 3, 1, 2, 3, 1, 0],
+].map((rows) => rows.map((row, cell) => ({ row, cell })));
+
+const CHAIN_BASE: [CellRef, CellRef][] = [
+  [{ row: 0, cell: 4 }, { row: 1, cell: 4 }],
+  [{ row: 0, cell: 9 }, { row: 1, cell: 9 }],
+  [{ row: 1, cell: 1 }, { row: 2, cell: 1 }],
+  [{ row: 1, cell: 6 }, { row: 2, cell: 6 }],
+  [{ row: 2, cell: 8 }, { row: 3, cell: 8 }],
+];
+const CHAIN_SHEETS = Array.from({ length: 5 }, (_, sheet) => CHAIN_BASE.map(([a, b]): [CellRef, CellRef] => {
+  const move = (ref: CellRef): CellRef => ({ row: ref.row, cell: ((ref.cell - 1 + sheet * 2) % 9) + 1 });
+  return [move(a), move(b)];
+}));
+
+export const CONNECTED_STEPS_BOARD: BoardDef = {
+  id: 'connected-steps',
+  name: 'Qwixx Connected A（阶梯）',
+  rows: [row('red', ASC), row('yellow', ASC), row('green', DESC), row('blue', DESC)],
+  scoreBy: 'row',
+  variant: { kind: 'connected-steps', sheets: STEP_PATTERNS },
+};
+
+export const CONNECTED_CHAIN_BOARD: BoardDef = {
+  id: 'connected-chain',
+  name: 'Qwixx Connected B（连锁）',
+  rows: [row('red', ASC), row('yellow', ASC), row('green', DESC), row('blue', DESC)],
+  scoreBy: 'row',
+  variant: { kind: 'connected-chain', sheets: CHAIN_SHEETS },
+};
+
+/** Qwixx X-Change official nine ordered white-sum swaps. */
+export const X_CHANGE_BOARD: BoardDef = {
+  id: 'x-change',
+  name: 'Qwixx X-Change（白骰和值交换）',
+  rows: [row('red', ASC), row('yellow', ASC), row('green', DESC), row('blue', DESC)],
+  scoreBy: 'row',
+  variant: {
+    kind: 'x-change',
+    swaps: [[8, 5], [9, 7], [11, 3], [7, 4], [10, 3], [8, 6], [10, 5], [11, 9], [6, 4]],
+  },
+};
+
 export const BOARD_PRESETS: Record<string, BoardDef> = {
   classic: CLASSIC_BOARD,
   'gemixxt-a': GEMIXXT_A_BOARD,
   'gemixxt-b': GEMIXXT_B_BOARD,
   longo: LONGO_BOARD,
   'big-points': BIG_POINTS_BOARD,
+  'double-a': DOUBLE_A_BOARD,
+  'double-b': DOUBLE_B_BOARD,
+  'bonus-a': BONUS_A_BOARD,
+  'bonus-b': BONUS_B_BOARD,
+  'connected-steps': CONNECTED_STEPS_BOARD,
+  'connected-chain': CONNECTED_CHAIN_BOARD,
+  'x-change': X_CHANGE_BOARD,
 };
 
 /** 校验棋盘定义的基本合法性（行数、格数、数字范围、奖励行、颜色计数）。 */
@@ -155,5 +275,26 @@ export function validateBoard(board: BoardDef): void {
     for (const c of COLORS) {
       if (counts.get(c) !== len) throw new Error(`color ${c} must appear exactly ${len} times`);
     }
+  }
+  const validRef = (ref: CellRef) => ref.row >= 0 && ref.row < 4 && ref.cell >= 0 && ref.cell < len;
+  const variant = board.variant;
+  if (variant?.kind === 'double-b' && variant.multiplierCells.some((cell) => cell < 0 || cell >= len)) {
+    throw new Error('invalid multiplier cell');
+  }
+  if (variant?.kind === 'bonus-a' && variant.triggerCells.some((ref) => !validRef(ref))) {
+    throw new Error('invalid bonus trigger');
+  }
+  if (variant?.kind === 'bonus-b' && Object.values(variant.symbols).flat().some((ref) => !validRef(ref))) {
+    throw new Error('invalid bonus symbol');
+  }
+  if (variant?.kind === 'connected-steps' && variant.sheets.some((sheet) => sheet.length !== 11 || sheet.some((ref) => !validRef(ref)))) {
+    throw new Error('invalid connected steps sheet');
+  }
+  if (variant?.kind === 'connected-chain' && variant.sheets.some((sheet) => {
+    const endpoints = sheet.flat();
+    const unique = new Set(endpoints.map((ref) => `${ref.row}:${ref.cell}`));
+    return sheet.length !== 5 || endpoints.some((ref) => !validRef(ref)) || unique.size !== endpoints.length;
+  })) {
+    throw new Error('invalid connected chain sheet');
   }
 }

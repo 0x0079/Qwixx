@@ -26,6 +26,23 @@ export interface BonusRowDef {
   numbers: number[];
 }
 
+export interface CellRef {
+  row: number;
+  cell: number;
+}
+
+export type BonusSymbol = 'circle' | 'diamond' | 'square' | 'octagon' | 'star';
+
+/** Official score-pad mechanics that keep the original Qwixx dice turn structure. */
+export type BoardVariant =
+  | { kind: 'double-a' }
+  | { kind: 'double-b'; multiplierCells: number[] }
+  | { kind: 'bonus-a'; triggerCells: CellRef[]; rewardTrack: Color[] }
+  | { kind: 'bonus-b'; symbols: Record<BonusSymbol, [CellRef, CellRef]> }
+  | { kind: 'connected-steps'; sheets: CellRef[][] }
+  | { kind: 'connected-chain'; sheets: [CellRef, CellRef][][] }
+  | { kind: 'x-change'; swaps: [number, number][] };
+
 /**
  * 记分卡（棋盘）定义。
  * scoreBy = 'row'：按行计数得分（官方各版本均如此）；
@@ -46,6 +63,8 @@ export interface BoardDef {
   rulesOverrides?: Partial<Pick<RulesConfig, 'dieFaces' | 'minMarksToLock'>>;
   /** 是否启用幸运数字（Longo）：每名玩家分到 2 个幸运数字。 */
   luckyNumbers?: boolean;
+  /** Optional official score-pad mechanic. */
+  variant?: BoardVariant;
 }
 
 export interface RulesConfig {
@@ -77,6 +96,14 @@ export interface PlayerState {
   marks: boolean[][];
   /** bonusMarks[bonusRow][cell] 是否已划记（无奖励行时为空数组）。 */
   bonusMarks: boolean[][];
+  /** A second cross in the same numbered cell (Qwixx Double). */
+  secondMarks: boolean[][];
+  /** Progress for score-pad-specific tracks and one-shot rewards. */
+  variantState: {
+    bonusTrackUsed?: boolean[];
+    bonusSymbols?: Partial<Record<BonusSymbol, boolean>>;
+    xChangeThrough?: number;
+  };
   penalties: number;
 }
 
@@ -87,7 +114,17 @@ export interface PlayerState {
  * - gameOver：游戏结束。
  * 锁定与骰子移除在白骰窗口全员结算完毕后立即生效（官方规则）。
  */
-export type Phase = 'whiteChoice' | 'colorChoice' | 'gameOver';
+export type Phase = 'whiteChoice' | 'colorChoice' | 'bonusChoice' | 'gameOver';
+
+export type PendingEffect =
+  | { kind: 'row'; row: number; remaining: number }
+  | { kind: 'fewest'; remaining: number; row?: number };
+
+export interface PendingBonus {
+  player: number;
+  resume: 'whiteChoice' | 'colorChoice';
+  effects: PendingEffect[];
+}
 
 export interface GameState {
   config: RulesConfig;
@@ -103,6 +140,8 @@ export interface GameState {
   whiteQueue: number[];
   /** 主动玩家本回合是否已划记（未划记则回合结束记失误）。 */
   activeMarked: boolean;
+  /** Bonus A/B mandatory crosses suspend the originating action until resolved. */
+  pendingBonus?: PendingBonus;
   turn: number;
   rngState: number;
   /** 游戏结束时填充：每名玩家的总分。 */
@@ -114,6 +153,10 @@ export interface GameState {
 export type Action =
   /** 白骰阶段：用双白骰之和划普通格。 */
   | { type: 'markWhite'; row: number; cell: number }
+  /** Double A: cross the most recently marked number a second time. */
+  | { type: 'markDoubleWhite'; row: number; cell: number }
+  /** X-Change: consume an ordered swap, then cross the exchanged white sum. */
+  | { type: 'markWhiteExchange'; row: number; cell: number; swap: number }
   /** 白骰阶段（Longo）：白骰和为幸运数字时，改划"划记最少的行"的下一格。 */
   | { type: 'markLucky'; row: number }
   /** 白骰阶段（Big Points）：白骰和触发奖励格。 */
@@ -121,15 +164,23 @@ export type Action =
   | { type: 'skipWhite' }
   /** 彩骰阶段（仅主动玩家）：1 白 + 1 彩划对应颜色普通格。 */
   | { type: 'markColor'; row: number; cell: number }
+  | { type: 'markDoubleColor'; row: number; cell: number }
   /** 彩骰阶段（Big Points）：彩骰组合触发奖励格。 */
   | { type: 'markBonusColor'; bonus: number; cell: number }
+  /** Mandatory choice created by Qwixx Bonus A/B. */
+  | { type: 'markForced'; row: number; cell: number }
   | { type: 'skipColor' };
 
 export function actionKey(a: Action): string {
   switch (a.type) {
     case 'markWhite':
     case 'markColor':
+    case 'markDoubleWhite':
+    case 'markDoubleColor':
+    case 'markForced':
       return `${a.type}:${a.row}:${a.cell}`;
+    case 'markWhiteExchange':
+      return `${a.type}:${a.row}:${a.cell}:${a.swap}`;
     case 'markLucky':
       return `${a.type}:${a.row}`;
     case 'markBonusWhite':

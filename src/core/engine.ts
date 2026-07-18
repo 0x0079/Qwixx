@@ -1,4 +1,4 @@
-import type { Action, BoardDef, Color, Dice, GameState, PlayerState, RulesConfig } from './types';
+import type { Action, BoardDef, BonusSymbol, CellRef, Color, Dice, GameState, PlayerState, RulesConfig } from './types';
 import { COLORS } from './types';
 import { nextRand, rollDie, seedToState } from './rng';
 import { validateBoard } from './board';
@@ -47,6 +47,14 @@ export function newGame(config: RulesConfig): GameState {
   const players: PlayerState[] = Array.from({ length: config.numPlayers }, () => ({
     marks: config.board.rows.map((r) => r.cells.map(() => false)),
     bonusMarks: (config.board.bonusRows ?? []).map((b) => b.numbers.map(() => false)),
+    secondMarks: config.board.rows.map((r) => r.cells.map(() => false)),
+    variantState: config.board.variant?.kind === 'bonus-a'
+      ? { bonusTrackUsed: config.board.variant.rewardTrack.map(() => false) }
+      : config.board.variant?.kind === 'bonus-b'
+        ? { bonusSymbols: {} }
+        : config.board.variant?.kind === 'x-change'
+          ? { xChangeThrough: -1 }
+          : {},
     penalties: 0,
   }));
   const state: GameState = {
@@ -94,6 +102,7 @@ function resetQueue(state: GameState): void {
 /** 当前需要行动的玩家；游戏结束时返回 -1。 */
 export function currentActor(state: GameState): number {
   if (state.phase === 'gameOver') return -1;
+  if (state.phase === 'bonusChoice') return state.pendingBonus!.player;
   if (state.phase === 'whiteChoice') return state.whiteQueue[0]!;
   return state.activePlayer;
 }
@@ -117,7 +126,7 @@ function cellMarkable(state: GameState, player: number, row: number, cell: numbe
   if (rightmostMark(state, player, row) >= cell) return false;
   const tail = state.config.board.lockableTail ?? 1;
   if (cell >= marks.length - tail) {
-    const count = marks.filter(Boolean).length;
+    const count = marks.filter(Boolean).length + state.players[player]!.secondMarks[row]!.filter(Boolean).length;
     if (count < state.config.minMarksToLock) return false;
   }
   return true;
@@ -159,6 +168,72 @@ function colorMarkableCells(state: GameState): { row: number; cell: number }[] {
     }
   }
   return out;
+}
+
+function sameRef(a: CellRef, b: CellRef): boolean {
+  return a.row === b.row && a.cell === b.cell;
+}
+
+function doubleLatestActions(state: GameState, player: number, phase: 'white' | 'color'): Action[] {
+  if (state.config.board.variant?.kind !== 'double-a') return [];
+  const out: Action[] = [];
+  state.config.board.rows.forEach((rowDef, row) => {
+    if (state.lockedRows[row]) return;
+    const cell = rightmostMark(state, player, row);
+    if (cell < 0 || state.players[player]!.secondMarks[row]![cell]) return;
+    const def = rowDef.cells[cell]!;
+    if (phase === 'white') {
+      if (def.number === whiteSum(state)) out.push({ type: 'markDoubleWhite', row, cell });
+      return;
+    }
+    const die = state.dice.colors[def.color];
+    if (die !== undefined && state.dice.white.some((white) => white + die === def.number)) {
+      out.push({ type: 'markDoubleColor', row, cell });
+    }
+  });
+  return out;
+}
+
+function exchangeActions(state: GameState, player: number): Action[] {
+  const variant = state.config.board.variant;
+  if (variant?.kind !== 'x-change') return [];
+  const through = state.players[player]!.variantState.xChangeThrough ?? -1;
+  const sum = whiteSum(state);
+  const out: Action[] = [];
+  variant.swaps.forEach(([a, b], swap) => {
+    if (swap <= through) return;
+    const exchanged = sum === a ? b : sum === b ? a : undefined;
+    if (exchanged === undefined) return;
+    for (const target of markableCells(state, player, exchanged)) {
+      out.push({ type: 'markWhiteExchange', ...target, swap });
+    }
+  });
+  return out;
+}
+
+function forcedActions(state: GameState): Action[] {
+  if (!state.pendingBonus) return [];
+  discardImpossibleEffects(state);
+  const pending = state.pendingBonus;
+  if (!pending) return legalActions(state);
+  const effect = pending.effects[0];
+  if (!effect) return [];
+  let rows: number[];
+  if (effect.kind === 'row') {
+    rows = [effect.row];
+  } else if (effect.row !== undefined) {
+    rows = [effect.row];
+  } else {
+    const candidates = state.config.board.rows
+      .map((_, row) => ({ row, count: state.players[pending.player]!.marks[row]!.filter(Boolean).length }))
+      .filter(({ row }) => !state.lockedRows[row] && state.config.board.rows[row]!.cells.some((_, cell) => cellMarkable(state, pending.player, row, cell)));
+    const min = Math.min(...candidates.map((candidate) => candidate.count));
+    rows = candidates.filter((candidate) => candidate.count === min).map((candidate) => candidate.row);
+  }
+  return rows.flatMap((row) => {
+    const cell = state.config.board.rows[row]!.cells.findIndex((_, index) => cellMarkable(state, pending.player, row, index));
+    return cell >= 0 ? [{ type: 'markForced', row, cell } as Action] : [];
+  });
 }
 
 /**
@@ -251,11 +326,14 @@ function bonusColorActions(state: GameState): Action[] {
 /** 当前决策者的所有合法动作（跳过永远合法）。 */
 export function legalActions(state: GameState): Action[] {
   if (state.phase === 'gameOver') return [];
+  if (state.phase === 'bonusChoice') return forcedActions(state);
   if (state.phase === 'whiteChoice') {
     const p = state.whiteQueue[0]!;
     const marks = markableCells(state, p, whiteSum(state));
     return [
       ...marks.map((m): Action => ({ type: 'markWhite', row: m.row, cell: m.cell })),
+      ...doubleLatestActions(state, p, 'white'),
+      ...exchangeActions(state, p),
       ...luckyActions(state, p),
       ...bonusWhiteActions(state, p),
       { type: 'skipWhite' },
@@ -264,6 +342,7 @@ export function legalActions(state: GameState): Action[] {
   const marks = colorMarkableCells(state);
   return [
     ...marks.map((m): Action => ({ type: 'markColor', row: m.row, cell: m.cell })),
+    ...doubleLatestActions(state, state.activePlayer, 'color'),
     ...bonusColorActions(state),
     { type: 'skipColor' },
   ];
@@ -278,7 +357,12 @@ function actionIdentity(a: Action): unknown[] {
   switch (a.type) {
     case 'markWhite':
     case 'markColor':
+    case 'markDoubleWhite':
+    case 'markDoubleColor':
+    case 'markForced':
       return [a.type, a.row, a.cell];
+    case 'markWhiteExchange':
+      return [a.type, a.row, a.cell, a.swap];
     case 'markLucky':
       return [a.type, a.row];
     case 'markBonusWhite':
@@ -304,11 +388,20 @@ function performMark(state: GameState, player: number, action: Action): boolean 
   switch (action.type) {
     case 'markWhite':
     case 'markColor':
+    case 'markWhiteExchange':
+    case 'markForced':
       state.players[player]!.marks[action.row]![action.cell] = true;
+      if (action.type === 'markWhiteExchange') state.players[player]!.variantState.xChangeThrough = action.swap;
+      afterCellMarked(state, player, { row: action.row, cell: action.cell });
+      return true;
+    case 'markDoubleWhite':
+    case 'markDoubleColor':
+      state.players[player]!.secondMarks[action.row]![action.cell] = true;
       return true;
     case 'markLucky': {
       const target = rightmostMark(state, player, action.row) + 1;
       state.players[player]!.marks[action.row]![target] = true;
+      afterCellMarked(state, player, { row: action.row, cell: target });
       return true;
     }
     case 'markBonusWhite':
@@ -320,30 +413,133 @@ function performMark(state: GameState, player: number, action: Action): boolean 
   }
 }
 
+function ensurePending(state: GameState, player: number): void {
+  if (state.pendingBonus) return;
+  const resume = state.phase === 'colorChoice' ? 'colorChoice' : 'whiteChoice';
+  state.pendingBonus = { player, resume, effects: [] };
+}
+
+function afterCellMarked(state: GameState, player: number, ref: CellRef): void {
+  const variant = state.config.board.variant;
+  const p = state.players[player]!;
+  if (!variant) return;
+
+  if (variant.kind === 'double-b' && variant.multiplierCells.includes(ref.cell)) {
+    p.secondMarks[ref.row]![ref.cell] = true;
+    return;
+  }
+
+  if (variant.kind === 'connected-chain') {
+    const sheet = variant.sheets[player % variant.sheets.length]!;
+    const pair = sheet.find(([a, b]) => sameRef(a, ref) || sameRef(b, ref));
+    if (pair) {
+      const other = sameRef(pair[0], ref) ? pair[1] : pair[0];
+      p.marks[other.row]![other.cell] = true;
+    }
+    return;
+  }
+
+  if (variant.kind === 'bonus-a' && variant.triggerCells.some((trigger) => sameRef(trigger, ref))) {
+    const used = p.variantState.bonusTrackUsed!;
+    const index = used.findIndex((value) => !value);
+    if (index >= 0) {
+      used[index] = true;
+      ensurePending(state, player);
+      state.pendingBonus!.effects.push({ kind: 'row', row: COLORS.indexOf(variant.rewardTrack[index]!), remaining: 1 });
+      state.phase = 'bonusChoice';
+    }
+    return;
+  }
+
+  if (variant.kind === 'bonus-b') {
+    const activated = p.variantState.bonusSymbols!;
+    for (const [symbol, pair] of Object.entries(variant.symbols) as [BonusSymbol, [CellRef, CellRef]][]) {
+      if (activated[symbol] || !pair.some((item) => sameRef(item, ref))) continue;
+      if (!pair.every((item) => p.marks[item.row]![item.cell])) continue;
+      activated[symbol] = true;
+      if (symbol === 'circle') {
+        ensurePending(state, player);
+        state.pendingBonus!.effects.push({ kind: 'fewest', remaining: 2 });
+      } else if (symbol === 'diamond') {
+        ensurePending(state, player);
+        for (let row = 0; row < 4; row++) state.pendingBonus!.effects.push({ kind: 'row', row, remaining: 1 });
+      }
+    }
+    if (state.pendingBonus?.effects.length) state.phase = 'bonusChoice';
+  }
+}
+
+function hasMarkableInRow(state: GameState, player: number, row: number): boolean {
+  return state.config.board.rows[row]!.cells.some((_, cell) => cellMarkable(state, player, row, cell));
+}
+
+function discardImpossibleEffects(state: GameState): void {
+  const pending = state.pendingBonus;
+  if (!pending) return;
+  while (pending.effects.length > 0) {
+    const effect = pending.effects[0]!;
+    if (effect.kind === 'row' || effect.row !== undefined) {
+      const row = effect.kind === 'row' ? effect.row : effect.row!;
+      if (hasMarkableInRow(state, pending.player, row)) break;
+      pending.effects.shift();
+      continue;
+    }
+    const any = state.config.board.rows.some((_, row) => !state.lockedRows[row] && hasMarkableInRow(state, pending.player, row));
+    if (any) break;
+    pending.effects.shift();
+  }
+  if (pending.effects.length === 0) finishPending(state);
+}
+
+function finishWhiteDecision(state: GameState): void {
+  state.phase = 'whiteChoice';
+  if (state.whiteQueue.length > 0) return;
+  resolveLocks(state);
+  if (checkGameEnd(state)) return;
+  state.phase = 'colorChoice';
+}
+
+function finishColorDecision(state: GameState): void {
+  state.phase = 'colorChoice';
+  if (!state.activeMarked) state.players[state.activePlayer]!.penalties += 1;
+  resolveLocks(state);
+  if (checkGameEnd(state)) return;
+  state.activePlayer = (state.activePlayer + 1) % state.config.numPlayers;
+  state.turn += 1;
+  rollDice(state);
+  resetQueue(state);
+}
+
+function finishPending(state: GameState): void {
+  const resume = state.pendingBonus!.resume;
+  delete state.pendingBonus;
+  if (resume === 'whiteChoice') finishWhiteDecision(state);
+  else finishColorDecision(state);
+}
+
 /** 原地应用动作（供高吞吐自对弈使用）。调用方需保证动作合法。 */
 export function applyActionInPlace(state: GameState, action: Action): void {
+  if (state.phase === 'bonusChoice') {
+    const pending = state.pendingBonus!;
+    const effect = pending.effects[0]!;
+    if (effect.kind === 'fewest' && effect.row === undefined) effect.row = action.type === 'markForced' ? action.row : undefined;
+    performMark(state, pending.player, action);
+    effect.remaining -= 1;
+    if (effect.remaining <= 0) pending.effects.shift();
+    discardImpossibleEffects(state);
+    return;
+  }
   if (state.phase === 'whiteChoice') {
     const p = state.whiteQueue.shift()!;
     if (performMark(state, p, action) && p === state.activePlayer) state.activeMarked = true;
-    if (state.whiteQueue.length === 0) {
-      // 动作 1（白骰）窗口全员结算完毕：锁定立即生效（官方规则）。
-      // 若锁满结束游戏，动作 2 不再执行，也不做失误判定。
-      resolveLocks(state);
-      if (checkGameEnd(state)) return;
-      state.phase = 'colorChoice';
-    }
+    if (state.pendingBonus) return;
+    finishWhiteDecision(state);
     return;
   }
   if (state.phase === 'colorChoice') {
     if (performMark(state, state.activePlayer, action)) state.activeMarked = true;
-    // 两步动作均未划记 → 主动玩家记 1 次失误（可自愿）。
-    if (!state.activeMarked) state.players[state.activePlayer]!.penalties += 1;
-    resolveLocks(state);
-    if (checkGameEnd(state)) return;
-    state.activePlayer = (state.activePlayer + 1) % state.config.numPlayers;
-    state.turn += 1;
-    rollDice(state);
-    resetQueue(state);
+    if (state.pendingBonus) return;
+    finishColorDecision(state);
     return;
   }
   throw new Error('game is over');
@@ -368,6 +564,14 @@ function resolveLocks(state: GameState): void {
         state.removedColors.push(rowDef.lockColor);
       }
       delete state.dice.colors[rowDef.lockColor];
+      const variant = state.config.board.variant;
+      if (variant?.kind === 'bonus-a') {
+        state.players.forEach((player) => {
+          variant.rewardTrack.forEach((color, index) => {
+            if (color === rowDef.lockColor) player.variantState.bonusTrackUsed![index] = true;
+          });
+        });
+      }
     }
   });
 }
