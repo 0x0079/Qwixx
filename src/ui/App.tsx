@@ -347,15 +347,15 @@ function SetupScreen({ setup, setSetup, onStart }: {
             )}
           </section>
 
-          <details className="panel rules">
-            <summary><span><Icon name="book" /> 规则速览</span><Icon name="chevron" /></summary>
+          <section className="panel rules" aria-labelledby="rules-title">
+            <div className="rules-heading"><Icon name="book" /><h2 id="rules-title">规则速览</h2></div>
             <ol>
               <li><b>全员行动：</b>所有玩家都可用两颗白骰之和划一格。</li>
               <li><b>主动加码：</b>主动玩家可再用一白一彩之和划对应颜色。</li>
               <li><b>从左到右：</b>跳过的数字不能回头，选择要谨慎。</li>
               <li><b>结束条件：</b>锁定 2 行或任一玩家累计 4 次失误。</li>
             </ol>
-          </details>
+          </section>
         </aside>
       </div>
 

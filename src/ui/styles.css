@@ -406,13 +406,11 @@ summary:focus-visible,
 .ready-note { color: #78837b; }
 .form-error { color: #b23d46; }
 
-.rules { padding: 0 18px; }
-.rules summary { display: flex; align-items: center; justify-content: space-between; min-height: 52px; cursor: pointer; list-style: none; color: #525c55; font-size: 12px; font-weight: 750; }
-.rules summary::-webkit-details-marker { display: none; }
-.rules summary span { display: flex; align-items: center; gap: 8px; }
-.rules summary > .icon { color: #929991; transition: transform 160ms ease; }
-.rules[open] summary > .icon { transform: rotate(180deg); }
-.rules ol { margin: 0 0 18px; padding-left: 21px; color: var(--muted); font-size: 11px; line-height: 1.6; }
+.rules { padding: 0 18px 18px; }
+.rules-heading { min-height: 52px; display: flex; align-items: center; gap: 8px; color: #525c55; }
+.rules-heading h2 { margin: 0; font-size: 12px; font-weight: 750; }
+.rules-heading .icon { color: var(--green); }
+.rules ol { margin: 0; padding-left: 21px; color: var(--muted); font-size: 11px; line-height: 1.6; }
 .rules li + li { margin-top: 7px; }
 .setup-footer { padding: 24px 0 0; text-align: center; color: #8c938d; font-size: 10px; }
 
