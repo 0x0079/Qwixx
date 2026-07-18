@@ -39,3 +39,10 @@ The requested UI/UX improvement is functional and preserves the existing rules-e
 - The desktop turn-control stack now measures 183 px at a 1980×900 viewport.
 - Both player score cards and the activity panel remain visible in that viewport without scrolling.
 - The 375 px mobile viewport still has no document-level horizontal overflow; score-card scrolling remains isolated inside each card.
+
+## Local Action Placement Check
+
+- Skip/end-turn controls render only in the current human actor's player-card header.
+- The global action banner contains no buttons and remains informational.
+- At a 1980×900 viewport, the skip control is approximately 226 px from the nearest legal score cell.
+- Activating skip advances the white-dice queue and changes the same local control to `结束回合` for the color phase.

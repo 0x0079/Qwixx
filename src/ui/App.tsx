@@ -515,12 +515,6 @@ function GameScreen({ game, setGame, setup, log, setLog, onExit, onRestart }: {
             </div>
             {isHumanTurn && legalMarks > 0 && <span className="choice-count">{legalMarks} 个可选格</span>}
             {!isHumanTurn && <span className="thinking"><i /><i /><i /></span>}
-            {isHumanTurn && skipAction && (
-              <button className="skip-button" type="button" onClick={() => step(skipAction)}>
-                {game.phase === 'whiteChoice' ? '本次跳过' : '结束回合'}
-                <Icon name="skip" />
-              </button>
-            )}
           </section>
         </>
       )}
@@ -552,6 +546,8 @@ function GameScreen({ game, setGame, setup, log, setLog, onExit, onRestart }: {
             isActive={i === game.activePlayer && game.phase !== 'gameOver'}
             markable={i === actor ? markable : new Map()}
             onMark={step}
+            onSkip={i === actor && isHumanTurn && skipAction ? () => step(skipAction) : undefined}
+            skipLabel={game.phase === 'whiteChoice' ? '本次跳过' : '结束回合'}
           />
         ))}
       </section>
@@ -663,7 +659,7 @@ function Die({ value, color }: { value: number | null; color: string }) {
   );
 }
 
-function PlayerCard({ game, playerIdx, name, kind, isActor, isActive, markable, onMark }: {
+function PlayerCard({ game, playerIdx, name, kind, isActor, isActive, markable, onMark, onSkip, skipLabel }: {
   game: GameState;
   playerIdx: number;
   name: string;
@@ -672,6 +668,8 @@ function PlayerCard({ game, playerIdx, name, kind, isActor, isActive, markable, 
   isActive: boolean;
   markable: Map<string, Action>;
   onMark: (a: Action) => void;
+  onSkip?: () => void;
+  skipLabel: string;
 }) {
   const player = game.players[playerIdx]!;
   const board = game.config.board;
@@ -730,6 +728,11 @@ function PlayerCard({ game, playerIdx, name, kind, isActor, isActive, markable, 
           {isActor && <span className="badge actor-badge">正在选择</span>}
           {!isActor && isActive && <span className="badge">主动玩家</span>}
           {lucky && <span className="lucky-badge">⭐ {lucky.join(' / ')}</span>}
+          {onSkip && (
+            <button className="card-skip-button" type="button" aria-label={`${skipLabel}，${name}`} onClick={onSkip}>
+              {skipLabel}<Icon name="skip" />
+            </button>
+          )}
         </div>
         <div className="card-score"><strong>{score.total}</strong><span>分</span></div>
       </div>

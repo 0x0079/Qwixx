@@ -84,7 +84,7 @@ summary:focus-visible,
 .secondary-button,
 .danger-button,
 .ghost-button,
-.skip-button {
+.card-skip-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -545,8 +545,6 @@ summary:focus-visible,
 .action-copy strong { font-size: 14px; }
 .action-copy small { color: var(--muted); font-size: 10px; line-height: 1.4; }
 .choice-count { margin-left: auto; padding: 5px 10px; border-radius: 999px; background: white; color: var(--green); font-size: 10px; font-weight: 750; white-space: nowrap; }
-.skip-button { min-height: 34px; margin-left: 3px; border-color: #d4d2ca; background: white; color: #59635c; font-size: 11px; }
-.skip-button:hover { border-color: #b5b9b4; color: var(--ink); transform: translateX(1px); }
 .thinking { display: flex; gap: 4px; margin-left: auto; padding: 10px; }
 .thinking i { width: 6px; height: 6px; border-radius: 50%; background: #7e9b87; animation: thinking 1.15s ease-in-out infinite; }
 .thinking i:nth-child(2) { animation-delay: 160ms; }
@@ -589,6 +587,9 @@ summary:focus-visible,
 .card-player strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
 .card-player span { color: var(--muted); font-size: 9px; }
 .card-badges { display: flex; align-items: center; gap: 5px; margin-left: auto; }
+.card-skip-button { min-height: 32px; padding: 0 10px; border-color: #d4d2ca; background: white; color: #4f5c54; border-radius: 9px; font-size: 10px; }
+.card-skip-button:hover { border-color: var(--green); background: var(--green-soft); color: var(--green-dark); transform: translateX(1px); }
+.card-skip-button .icon { width: 13px; height: 13px; }
 .badge, .lucky-badge { padding: 4px 7px; border-radius: 6px; font-size: 8px; font-weight: 750; white-space: nowrap; }
 .badge { background: #fff3d4; color: #946900; }
 .actor-badge { background: var(--green-soft); color: var(--green); }
@@ -745,7 +746,6 @@ summary:focus-visible,
   .action-icon { width: 38px; height: 38px; }
   .action-copy { width: auto; overflow-wrap: anywhere; }
   .choice-count { grid-column: 2; justify-self: start; margin-left: 0; }
-  .skip-button { grid-column: 2; justify-self: stretch; margin-left: 0; }
   .thinking { grid-column: 2; justify-self: start; margin-left: 0; }
   .scoreboard-strip { grid-template-columns: 1fr 1fr; }
   .scoreboard-strip > div { grid-template-columns: 14px 8px minmax(0, 1fr) 30px; }
@@ -771,7 +771,6 @@ summary:focus-visible,
   .sum-card { height: 34px; }
   .scoreboard-strip { grid-template-columns: 1fr; }
   .choice-count { display: none; }
-  .skip-button { width: 100%; margin-left: 0; }
   .card-foot { align-items: flex-start; flex-direction: column; }
   .confirm-dialog > div { grid-template-columns: 1fr; }
 }
