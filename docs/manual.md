@@ -6,8 +6,8 @@
 ## 快速上手
 
 ```bash
-npm install
-npm run dev     # 打开终端提示的地址（默认 http://localhost:5173）
+pnpm install
+pnpm dev     # 打开终端提示的地址（默认 http://localhost:5173）
 ```
 
 设置页中：

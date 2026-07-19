@@ -170,7 +170,7 @@ encodeObservation(state, viewer, maxPlayers=5): Float32Array
 ## 竞技场 CLI（src/cli/arena.ts）
 
 ```bash
-npm run arena -- [--games N] [--bots a,b,...] [--board ID] [--seed S] [--traj FILE] [--no-rotate]
+pnpm arena -- [--games N] [--bots a,b,...] [--board ID] [--seed S] [--traj FILE] [--no-rotate]
 ```
 
 | 参数 | 缺省 | 说明 |

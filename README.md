@@ -24,13 +24,13 @@
 ## 快速开始
 
 ```bash
-npm install
+pnpm install
 
-npm run dev        # 启动网页版（人类 vs AI 对局）
-npm test           # 引擎规则测试（vitest）
-npm run arena -- --games 1000 --bots heuristic,greedy,random   # 机器人对战统计
-npm run arena -- --games 100 --bots heuristic,heuristic --traj out/traj.jsonl  # 导出训练轨迹
-npm run build      # 类型检查 + 生产构建（dist/ 为纯静态站点）
+pnpm dev        # 启动网页版（人类 vs AI 对局）
+pnpm test       # 引擎规则测试（vitest）
+pnpm arena -- --games 1000 --bots heuristic,greedy,random   # 机器人对战统计
+pnpm arena -- --games 100 --bots heuristic,heuristic --traj out/traj.jsonl  # 导出训练轨迹
+pnpm build      # 类型检查 + 生产构建（dist/ 为纯静态站点）
 ```
 
 ## 训练 AI 玩家

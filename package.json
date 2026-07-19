@@ -2,6 +2,12 @@
   "name": "qwixx",
   "version": "0.1.0",
   "private": true,
+  "packageManager": "pnpm@10.33.4",
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
+  },
   "type": "module",
   "description": "Qwixx digital edition: rules engine, AI bots, self-play arena, and web UI",
   "scripts": {

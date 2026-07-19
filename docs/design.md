@@ -93,7 +93,7 @@ Longo / Big Points 的实现依据官方英文规则 PDF（QwixxLongo_GB.pdf / Q
   座位序）、锁行、移除骰色、骰值（按骰面数归一化）、阶段、是否主动/当前决策者、
   幸运数字；全部归一化到 [0,1]。
 - **确定性**：种子完全决定骰子序列；同种子 + 同策略 ⇒ 完全相同对局（有测试保证）。
-- **轨迹导出**：`npm run arena -- --games N --bots a,b --traj out/traj.jsonl`
+- **轨迹导出**：`pnpm arena -- --games N --bots a,b --traj out/traj.jsonl`
   每行一条 `{seed, turn, actor, bot, obs, action}`，可直接喂给 Python 训练管线
   （行为克隆/离线 RL）；在线 RL 可直接在 Node 侧用 `newGame/legalActions/applyActionInPlace`
   搭 self-play 循环，或将引擎经由 JSON 协议桥接到 Python。
@@ -111,4 +111,4 @@ Longo / Big Points 的实现依据官方英文规则 PDF（QwixxLongo_GB.pdf / Q
 ## 网页 UI
 
 Vite + React 本地热座对局：任意人数（1–5）人类/AI 混合、三种棋盘预设、可设种子。
-AI 决策自动播放；人类回合点击格子/按钮行动。`npm run dev` 启动。
+AI 决策自动播放；人类回合点击格子/按钮行动。`pnpm dev` 启动。

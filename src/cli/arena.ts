@@ -2,8 +2,8 @@
  * 自对弈竞技场：让机器人互相对战，统计胜率与平均分，可导出轨迹用于 AI 训练。
  *
  * 用法：
- *   npm run arena -- --games 1000 --bots heuristic,greedy,random --board classic --seed 42
- *   npm run arena -- --games 100 --bots heuristic,heuristic --traj out/traj.jsonl
+ *   pnpm arena -- --games 1000 --bots heuristic,greedy,random --board classic --seed 42
+ *   pnpm arena -- --games 100 --bots heuristic,heuristic --traj out/traj.jsonl
  */
 import { mkdirSync, createWriteStream } from 'node:fs';
 import { dirname } from 'node:path';

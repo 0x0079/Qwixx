@@ -57,7 +57,7 @@ stdio/HTTP 服务由 Python 驱动（状态与动作都是 JSON 可序列化的�
 用竞技场批量生成教师轨迹（行为克隆 / 离线 RL）：
 
 ```bash
-npm run arena -- --games 5000 --bots heuristic,heuristic --traj out/traj.jsonl
+pnpm arena -- --games 5000 --bots heuristic,heuristic --traj out/traj.jsonl
 ```
 
 每行一条决策记录：
@@ -108,7 +108,7 @@ BOT_REGISTRY['policy'] = () => new PolicyBot();
 2. 用竞技场对战基线（座位自动轮换消除先手优势）：
 
 ```bash
-npm run arena -- --games 2000 --bots policy,heuristic
+pnpm arena -- --games 2000 --bots policy,heuristic
 ```
 
 3. 注册后 UI 会自动出现该选项，可直接与人类对战。
