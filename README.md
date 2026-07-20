@@ -32,6 +32,7 @@ pnpm dev        # 启动网页版（人类 vs AI 对局）
 pnpm test       # 引擎规则测试（vitest）
 pnpm arena -- --games 1000 --bots heuristic,greedy,random   # 机器人对战统计
 pnpm arena -- --games 100 --bots heuristic,heuristic --traj out/traj.jsonl  # 导出训练轨迹
+pnpm tune       # 搜索 HeuristicBot 权重（网格 + 保留集验证）
 pnpm build      # 类型检查 + 生产构建（dist/ 为纯静态站点）
 ```
 

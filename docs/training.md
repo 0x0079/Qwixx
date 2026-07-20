@@ -129,3 +129,6 @@ pnpm arena -- --games 2000 --bots policy,heuristic
 超过 heuristic 即说明策略学到了非平凡的跳格/锁行权衡；
 `rollout`（蒙特卡洛前瞻，约 1.6s/局）是当前最强基线，可作为 RL 的教师策略
 （`arena --traj` 导它的轨迹做行为克隆 warm start）与训练后的对战及格线。
+
+heuristic 的默认权重可用 `pnpm tune` 重新搜索（例如换棋盘/对手池后）：
+两阶段网格搜索 + 保留种子集验证，详见 [api.md](api.md) 调参 CLI 一节。

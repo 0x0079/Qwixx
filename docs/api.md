@@ -135,8 +135,8 @@ BOT_REGISTRY       // { random, greedy, heuristic, rollout, rollout-lite } 工�
 
 - `RandomBot`：合法动作均匀随机（下限基线）；
 - `GreedyBot(maxSkip=1)`：跳格 ≤1 时取边际得分最高的划记，主动玩家兜底避免失误；
-- `HeuristicBot(wSkip=1.8, markBonus=1, baseMaxSkip=1)`：边际得分 − 跳格代价（随进度放宽）
-  + 锁行奖励 + 硬性跳格上限，参数经对战扫描调优；
+- `HeuristicBot(wSkip=2.0, markBonus=2.25, baseMaxSkip=1)`：边际得分 − 跳格代价（随进度放宽）
+  + 锁行奖励 + 硬性跳格上限，默认权重由 `pnpm tune` 搜索得出（见下文调参 CLI）；
 - `RolloutBot(rollouts=32, policy=HeuristicBot)`（`src/ai/rollout.ts`）：蒙特卡洛 rollout
   搜索——对每个合法动作重随机化未来骰子并用 policy 模拟 N 局到终局，取平均分差最高者。
   所有候选动作共用同一组骰子种子（公共随机数）做成对比较以消方差。
@@ -188,3 +188,15 @@ pnpm arena -- [--games N] [--bots a,b,...] [--board ID] [--seed S] [--traj FILE]
 | `--no-rotate` | — | 关闭座位轮换（默认轮换以消除先手优势） |
 
 输出各机器人的胜率（并列平分）、平均分与平均失误。
+
+## 调参 CLI（src/cli/tune.ts）
+
+```bash
+pnpm tune -- [--games N] [--board ID] [--seed S] [--opponents a,b,...]
+```
+
+对 `HeuristicBot` 的 `(wSkip, markBonus, baseMaxSkip)` 做两阶段搜索：
+粗网格（105 组）→ 前 3 名邻域细化（双倍局数）→ 前 3 名 + 当前默认值
+在保留种子集上大样本验证（5 倍局数）。适应度为对 `--opponents`
+（缺省 heuristic,greedy）的平均胜率，座位轮换，各阶段种子集互不重叠。
+`--games`（缺省 400）为粗网格阶段每对手局数。全流程约 1~2 分钟。
