@@ -203,3 +203,12 @@ pnpm tune -- [--games N] [--board ID] [--seed S] [--opponents a,b,...]
 在保留种子集上大样本验证（5 倍局数）。适应度为对 `--opponents`
 （缺省 heuristic,greedy）的平均胜率，座位轮换，各阶段种子集互不重叠。
 `--games`（缺省 400）为粗网格阶段每对手局数。全流程约 1~2 分钟。
+
+## RL 环境桥接（src/cli/env-server.ts）
+
+把引擎暴露为 stdio JSON-lines 向量环境，供 Python 训练脚本驱动
+（协议见文件头注释）：`init`（棋盘/环境数/对手/种子）→ `reset` / `step`。
+智能体只在合法动作 ≥2 的真决策点被询问，对手回合与单选时刻由服务端
+自动推进；座位逐局轮换；奖励为终局分差/30。对手可为任意注册机器人，
+或 `policy:<权重路径>`（自对弈快照）。实测吞吐约 3 万环境步/秒
+（16 env、heuristic 对手）。

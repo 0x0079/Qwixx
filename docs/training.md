@@ -86,6 +86,23 @@ pnpm arena -- --games 2000 --bots policy,heuristic
 胜率 65.9%（2000 局），对教师 rollout 打平（49% : 51%，100 局），
 推理微秒级——蒸馏几乎无损且比教师快约 350 倍。
 
+### PPO 自对弈微调（training/ppo_train.py）
+
+在 BC 权重上继续用 MaskablePPO（sb3-contrib）自对弈训练：
+
+```bash
+pip install -r training/requirements.txt
+python3 training/ppo_train.py --rounds 3 --steps-per-round 300000 \
+  --out out/ppo-candidate.json --parity-fixture out/ppo-parity.json
+# 复核后再覆盖 src/ai/weights/policy-classic.json 与 tests/fixtures/
+```
+
+环境经 `src/cli/env-server.ts` stdio 桥接（见 api.md），按轮自对弈：
+每轮对手固定为上一轮策略快照（第 1 轮为 BC 权重），轮末快照当前策略。
+热启动把 BC 权重同时装进 pi / vf 两套网络；训练完在保留种子上对
+heuristic 评估，只有超过 BC 基线才值得覆盖权重。奖励为终局分差/30、
+gamma=1（回合制终局奖励），动作掩码贯穿采样与更新。
+
 每行一条决策记录：
 
 ```json

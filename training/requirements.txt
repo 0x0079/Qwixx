@@ -2,7 +2,7 @@
 # torch 建议装 CPU 版：pip install torch --index-url https://download.pytorch.org/whl/cpu
 torch>=2.0
 numpy>=1.24
-# PPO 自对弈微调（train_ppo.py）需要：
-# stable-baselines3>=2.0
-# sb3-contrib>=2.0
-# gymnasium>=0.29
+# PPO 自对弈微调（ppo_train.py）：
+stable-baselines3>=2.0
+sb3-contrib>=2.0
+gymnasium>=0.29
