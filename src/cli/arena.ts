@@ -5,13 +5,13 @@
  *   pnpm arena -- --games 1000 --bots heuristic,greedy,random --board classic --seed 42
  *   pnpm arena -- --games 100 --bots heuristic,heuristic --traj out/traj.jsonl
  */
-import { mkdirSync, createWriteStream } from 'node:fs';
+import { mkdirSync, openSync, writeSync, closeSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { newGame, currentActor, applyActionInPlace, configForBoard } from '../core/engine';
 import { BOARD_PRESETS, randomMixedBoard } from '../core/board';
 import type { GameState } from '../core/types';
 import { BOT_REGISTRY, makeRand, type Bot } from '../ai/bots';
-import { encodeObservation, makeCodec } from '../ai/encode';
+import { encodeObservation, legalActionMask, makeCodec } from '../ai/encode';
 
 interface Args {
   games: number;
@@ -41,7 +41,7 @@ function playGame(
   bots: Bot[],
   board: string,
   seed: number,
-  trajOut?: NodeJS.WritableStream,
+  trajFd?: number,
 ): GameState {
   const boardDef = board.startsWith('random')
     ? randomMixedBoard(seed)
@@ -54,15 +54,22 @@ function playGame(
     if (++steps > 100000) throw new Error('game did not terminate');
     const actor = currentActor(state);
     const action = bots[actor]!.chooseAction(state, actor, rands[actor]!);
-    if (trajOut) {
-      trajOut.write(
+    if (trajFd !== undefined) {
+      const mask = legalActionMask(state, codec);
+      const legal: number[] = [];
+      for (let i = 0; i < mask.length; i++) if (mask[i]) legal.push(i);
+      // 同步写：主循环不让出事件循环，异步流会把全部轨迹缓存在内存里直到结束
+      writeSync(
+        trajFd,
         JSON.stringify({
           seed,
           turn: state.turn,
           actor,
           bot: bots[actor]!.name,
-          obs: Array.from(encodeObservation(state, actor)),
+          // 4 位小数足够训练用，可显著压缩文件体积
+          obs: Array.from(encodeObservation(state, actor), (v) => Math.round(v * 10000) / 10000),
           action: codec.actionToIndex(action),
+          legal,
         }) + '\n',
       );
     }
@@ -81,10 +88,10 @@ function main(): void {
     }
   }
 
-  let trajStream: NodeJS.WritableStream | undefined;
+  let trajFd: number | undefined;
   if (args.traj) {
     mkdirSync(dirname(args.traj), { recursive: true });
-    trajStream = createWriteStream(args.traj);
+    trajFd = openSync(args.traj, 'w');
   }
 
   const n = botNames.length;
@@ -98,7 +105,7 @@ function main(): void {
     // 轮换座位消除先手优势：第 g 局第 i 个座位由 bot[(i+g)%n] 执掌。
     const offset = args.rotate ? g % n : 0;
     const seatBots = botNames.map((_, i) => BOT_REGISTRY[botNames[(i + offset) % n]!]!());
-    const final = playGame(seatBots, args.board, args.seed + g, trajStream);
+    const final = playGame(seatBots, args.board, args.seed + g, trajFd);
     totalTurns += final.turn;
     final.finalScores!.forEach((s, seat) => {
       const botIdx = (seat + offset) % n;
@@ -110,7 +117,7 @@ function main(): void {
     }
   }
   const ms = Date.now() - t0;
-  if (trajStream) trajStream.end();
+  if (trajFd !== undefined) closeSync(trajFd);
 
   console.log(`\n对局数: ${args.games}  棋盘: ${args.board}  用时: ${ms}ms  平均回合数: ${(totalTurns / args.games).toFixed(1)}\n`);
   console.log('机器人        胜率      平均分    平均失误');

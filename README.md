@@ -16,7 +16,9 @@
   失误上限、锁行门槛、骰面数等规则参数均可配置。
 - **AI 机器人**（`src/ai`）：random / greedy / heuristic 三档基线 +
   rollout / rollout-lite 两档蒙特卡洛前瞻搜索（公共随机数配对消方差，
-  rollout 对 heuristic 胜率约 69%），统一 `Bot` 接口，
+  rollout 对 heuristic 胜率约 69%）+ **policy 神经网络策略**
+  （Python 侧行为克隆蒸馏 rollout 教师，实战与教师打平、推理微秒级，
+  UI 零运行时依赖），统一 `Bot` 接口，
   全部支持上述所有变体（含幸运数字与奖励格动作估值）。
 - **自对弈竞技场**（`src/cli/arena.ts`）：批量对局统计胜率与均分，可导出 JSONL 轨迹。
 - **RL 训练接口**（`src/ai/encode.ts`）：按棋盘生成的固定维度离散动作空间（经典 94 维）、

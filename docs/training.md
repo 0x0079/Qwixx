@@ -60,6 +60,32 @@ stdio/HTTP 服务由 Python 驱动（状态与动作都是 JSON 可序列化的�
 pnpm arena -- --games 5000 --bots heuristic,heuristic --traj out/traj.jsonl
 ```
 
+### 现成的 BC 管线（training/bc_train.py）
+
+仓库已带一条完整的行为克隆管线（`policy` 机器人即由此产出）：
+
+```bash
+# 1) rollout 教师自对弈生成数据（可开多进程分片，约 3s/局）
+for i in 0 1 2 3; do
+  pnpm arena -- --games 300 --bots rollout,rollout \
+    --traj out/bc-$i.jsonl --seed $((10000 + i * 300)) &
+done; wait
+
+# 2) 训练（torch，CPU 几分钟）并导出 TS 可加载的权重 + 前向一致性 fixture
+pip install -r training/requirements.txt
+python3 training/bc_train.py --data "out/bc-*.jsonl" \
+  --out src/ai/weights/policy-classic.json --board classic
+
+# 3) 验证与评估
+pnpm test                                           # 含 TS↔torch 前向一致性回归
+pnpm arena -- --games 2000 --bots policy,heuristic
+```
+
+导出格式见 `src/ai/mlp.ts` 头注释（W 为 [in, out] 行主序、Float32 base64）。
+实测（1200 局教师数据、128×128 MLP、val-acc 75.9%）：policy 对 heuristic
+胜率 65.9%（2000 局），对教师 rollout 打平（49% : 51%，100 局），
+推理微秒级——蒸馏几乎无损且比教师快约 350 倍。
+
 每行一条决策记录：
 
 ```json
@@ -68,8 +94,9 @@ pnpm arena -- --games 5000 --bots heuristic,heuristic --traj out/traj.jsonl
   "turn": 7,             // 回合号
   "actor": 0,            // 决策玩家座位
   "bot": "heuristic",    // 决策者名称
-  "obs": [0, 1, ...],    // encodeObservation 的观测向量
-  "action": 42           // codec.actionToIndex 的动作下标
+  "obs": [0, 1, ...],    // encodeObservation 的观测向量（4 位小数）
+  "action": 42,          // codec.actionToIndex 的动作下标
+  "legal": [3, 42, 93]   // 该时刻合法动作下标（训练时做掩码）
 }
 ```
 
@@ -125,6 +152,8 @@ pnpm arena -- --games 2000 --bots policy,heuristic
 | heuristic vs greedy（big-points，300 局） | 50% : 50% | 170 : 171 |
 | rollout vs heuristic（classic，100 局） | 69% : 31% | 70 : 58 |
 | rollout-lite vs heuristic（classic，100 局） | 57% : 43% | 63 : 60 |
+| policy vs heuristic（classic，2000 局） | 66% : 34% | 72 : 60 |
+| policy vs rollout（classic，100 局） | 49% : 51% | 73 : 71 |
 
 超过 heuristic 即说明策略学到了非平凡的跳格/锁行权衡；
 `rollout`（蒙特卡洛前瞻，约 1.6s/局）是当前最强基线，可作为 RL 的教师策略

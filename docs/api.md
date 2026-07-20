@@ -141,7 +141,10 @@ BOT_REGISTRY       // { random, greedy, heuristic, rollout, rollout-lite } 工�
   搜索——对每个合法动作重随机化未来骰子并用 policy 模拟 N 局到终局，取平均分差最高者。
   所有候选动作共用同一组骰子种子（公共随机数）做成对比较以消方差。
   `rollout` 为 N=32 强档，`rollout-lite` 为 N=16 低延迟档（适合 UI 实时对局）。
-  另导出 `cloneForSearch(state)`：共享 config 引用的快速状态克隆，供搜索/训练复用。
+  另导出 `cloneForSearch(state)`：共享 config 引用的快速状态克隆，供搜索/训练复用；
+- `PolicyBot`（`src/ai/policy.ts`）：神经网络策略。加载 `training/` 训练导出的
+  MLP 权重（`src/ai/weights/*.json`），前向推理（`src/ai/mlp.ts`，零依赖）+
+  掩码 argmax，微秒级延迟。权重与训练棋盘绑定，未训练棋盘自动回退 heuristic。
 
 ## RL 编码（src/ai/encode.ts）
 

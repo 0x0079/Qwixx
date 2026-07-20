@@ -3,6 +3,7 @@ import { legalActions, rightmostMark } from '../core/engine';
 import { effectiveRowCount } from '../core/scoring';
 import { nextRand } from '../core/rng';
 import { RolloutBot } from './rollout';
+import { PolicyBot } from './policy';
 
 /**
  * 机器人接口：给定状态与合法动作，返回一个动作。
@@ -194,4 +195,5 @@ export const BOT_REGISTRY: Record<string, () => Bot> = {
   heuristic: () => new HeuristicBot(),
   rollout: () => new RolloutBot(),
   'rollout-lite': () => new RolloutBot(16, new HeuristicBot(), 'rollout-lite'),
+  policy: () => new PolicyBot(),
 };
