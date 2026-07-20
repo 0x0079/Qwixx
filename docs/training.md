@@ -103,6 +103,13 @@ python3 training/ppo_train.py --rounds 3 --steps-per-round 300000 \
 heuristic 评估，只有超过 BC 基线才值得覆盖权重。奖励为终局分差/30、
 gamma=1（回合制终局奖励），动作掩码贯穿采样与更新。
 
+实测（3 轮 × 30 万步、lr 1e-4、采样约 2500 步/秒）：候选权重对
+heuristic 65.9%（与 BC 持平）、对 rollout 51%（BC 为 49%）、
+**对 BC 直接对战 47.3%——未超过基线，正式权重保持 BC 版本**。
+BC 已几乎吃满教师水平，小网络 + 稀疏终局奖励下 PPO 短期难有净增益；
+如要继续，值得试：更长训练与更多轮快照、对手池混入 heuristic/rollout
+防过拟合单一对手、势函数奖励塑形（computeScore 逐步差分）、更大网络。
+
 每行一条决策记录：
 
 ```json
