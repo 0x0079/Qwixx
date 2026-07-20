@@ -82,9 +82,17 @@ pnpm arena -- --games 2000 --bots policy,heuristic
 ```
 
 导出格式见 `src/ai/mlp.ts` 头注释（W 为 [in, out] 行主序、Float32 base64）。
-实测（1200 局教师数据、128×128 MLP、val-acc 75.9%）：policy 对 heuristic
-胜率 65.9%（2000 局），对教师 rollout 打平（49% : 51%，100 局），
-推理微秒级——蒸馏几乎无损且比教师快约 350 倍。
+
+当前权重（v2）的训练配置与实测：
+- 数据 2000 局 / 13.9 万决策：1200 局 rollout(32) 自对弈 + 800 局
+  **DAgger 补充**（policy 驱动对局走出学生状态分布、`--label-bot rollout`
+  教师标注，修正 BC 分布偏移；对手混 policy/heuristic/rollout-lite）；
+- 架构 256×256 + 联合训练价值头（终局分差回归，val-V-MAE ≈ 14.5 分，
+  给 PPO 热启动一个可用的 critic）；val-acc 76.0%；
+- 战绩：对 heuristic 67~68%（两组各 2000 局）、对教师 rollout 分差 +3.8
+  （100 局）、对 128×128 无价值头的 v1 直接对战 50.9%；推理微秒级，
+  比教师快约 350 倍。v1（1200 局、128×128、无 DAgger）对 heuristic
+  为 65.9%——增量主要来自 DAgger 数据与容量。
 
 ### PPO 自对弈微调（training/ppo_train.py）
 
@@ -103,12 +111,17 @@ python3 training/ppo_train.py --rounds 3 --steps-per-round 300000 \
 heuristic 评估，只有超过 BC 基线才值得覆盖权重。奖励为终局分差/30、
 gamma=1（回合制终局奖励），动作掩码贯穿采样与更新。
 
-实测（3 轮 × 30 万步、lr 1e-4、采样约 2500 步/秒）：候选权重对
-heuristic 65.9%（与 BC 持平）、对 rollout 51%（BC 为 49%）、
-**对 BC 直接对战 47.3%——未超过基线，正式权重保持 BC 版本**。
-BC 已几乎吃满教师水平，小网络 + 稀疏终局奖励下 PPO 短期难有净增益；
-如要继续，值得试：更长训练与更多轮快照、对手池混入 heuristic/rollout
-防过拟合单一对手、势函数奖励塑形（computeScore 逐步差分）、更大网络。
+两轮实测均未超过 BC 起点，正式权重保持 BC 版本：
+- v1（3 轮 × 30 万步、单一快照对手、稀疏终局奖励、无价值热启动）：
+  对 BC 直接对战 47.3%；
+- v2（4 轮 × 35 万步、对手池 heuristic+BC 锚点+快照、势函数塑形、
+  价值头热启动、逐轮 lr 衰减）：对 BC v2 直接对战 49.6%、对
+  heuristic 66.6%（BC v2 为 68.0%）——诸多正确性改进让 PPO 不再
+  劣化策略，但仍无净增益。
+结论：rollout 教师 + DAgger 的 BC 在该网络规模下已贴近这套观测编码
+的天花板，PPO 的采样效率不足以在百万步级别再往上推。若要继续冲，
+优先级依次：更强教师（加大 rollout N 或 MCTS 化）后重新蒸馏、
+结构化观测编码（按行/按玩家分组的共享编码器）、10 倍以上训练步数。
 
 每行一条决策记录：
 
@@ -176,7 +189,7 @@ pnpm arena -- --games 2000 --bots policy,heuristic
 | heuristic vs greedy（big-points，300 局） | 50% : 50% | 170 : 171 |
 | rollout vs heuristic（classic，100 局） | 69% : 31% | 70 : 58 |
 | rollout-lite vs heuristic（classic，100 局） | 57% : 43% | 63 : 60 |
-| policy vs heuristic（classic，2000 局） | 66% : 34% | 72 : 60 |
+| policy vs heuristic（classic，2000 局） | 67% : 33% | 72 : 60 |
 | policy vs rollout（classic，100 局） | 49% : 51% | 73 : 71 |
 
 超过 heuristic 即说明策略学到了非平凡的跳格/锁行权衡；

@@ -175,10 +175,14 @@ def evaluate(model: MaskablePPO, board: str, opponent: str, episodes: int, seed:
 
 
 def regen_parity_fixture(weights_path: Path, fixture_path: Path) -> None:
-    """权重换了，重算 fixture 的期望 logits/value（复用原 obs）。"""
+    """权重换了，重算 fixture 的期望 logits/value（复用原 obs；无原 fixture 则用零向量）。"""
     data = json.loads(weights_path.read_text())
-    fixture = json.loads(fixture_path.read_text())
     arch, t = data["arch"], data["tensors"]
+    fixture = (
+        json.loads(fixture_path.read_text())
+        if fixture_path.exists()
+        else {"obs": [0.0] * arch["input"]}
+    )
     x = torch.tensor(fixture["obs"], dtype=torch.float32)
     sizes = [arch["input"], *arch["hidden"]]
     h = x
