@@ -31,7 +31,7 @@ from stable_baselines3.common.vec_env.base_vec_env import VecEnv
 class QwixxVecEnv(VecEnv):
     """经 stdio JSON-lines 桥接 Node 引擎（src/cli/env-server.ts）的向量环境。"""
 
-    def __init__(self, num_envs: int, board: str, opponent: str, seed: int):
+    def __init__(self, num_envs: int, board: str, opponent: str, seed: int, shaping: bool = False):
         self.proc = subprocess.Popen(
             ["node_modules/.bin/tsx", "src/cli/env-server.ts"],
             stdin=subprocess.PIPE,
@@ -39,7 +39,9 @@ class QwixxVecEnv(VecEnv):
             text=True,
             bufsize=1,
         )
-        info = self._rpc({"cmd": "init", "board": board, "numEnvs": num_envs, "opponent": opponent, "seed": seed})
+        info = self._rpc(
+            {"cmd": "init", "board": board, "numEnvs": num_envs, "opponent": opponent, "seed": seed, "shaping": shaping}
+        )
         self.n_actions = info["numActions"]
         observation_space = spaces.Box(low=0.0, high=1.0, shape=(info["obsSize"],), dtype=np.float32)
         action_space = spaces.Discrete(self.n_actions)
@@ -200,7 +202,10 @@ def main() -> None:
     ap.add_argument("--steps-per-round", type=int, default=200_000)
     ap.add_argument("--num-envs", type=int, default=16)
     ap.add_argument("--lr", type=float, default=1e-4)
+    ap.add_argument("--lr-decay", type=float, default=0.6, help="每轮学习率衰减系数")
     ap.add_argument("--ent-coef", type=float, default=0.005)
+    ap.add_argument("--opponents", default="heuristic", help="固定对手池（逗号分隔），快照对手自动附加")
+    ap.add_argument("--shaping", action="store_true", help="势函数奖励塑形（即时分差差分）")
     ap.add_argument("--eval-episodes", type=int, default=1000)
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--parity-fixture", default="tests/fixtures/policy-parity.json")
@@ -216,7 +221,9 @@ def main() -> None:
 
     model: MaskablePPO | None = None
     for rnd in range(1, args.rounds + 1):
-        env = QwixxVecEnv(args.num_envs, args.board, f"policy:{opponent_path}", args.seed + rnd * 10_000)
+        # 对手池 = 固定池（heuristic 等）+ BC 锚点 + 上一轮快照，防止过拟合单一对手
+        pool = f"{args.opponents},policy:{args.bc_weights},policy:{opponent_path}"
+        env = QwixxVecEnv(args.num_envs, args.board, pool, args.seed + rnd * 10_000, shaping=args.shaping)
         if model is None:
             model = MaskablePPO(
                 "MlpPolicy",
@@ -236,7 +243,10 @@ def main() -> None:
             load_bc_into(model, bc)
         else:
             model.set_env(env)
-        print(f"=== 第 {rnd}/{args.rounds} 轮：对手 = 上一轮策略快照 ===")
+            lr = args.lr * (args.lr_decay ** (rnd - 1))
+            model.lr_schedule = (lambda v: (lambda _progress: v))(lr)
+            print(f"[lr] 第 {rnd} 轮学习率 {lr:.2e}")
+        print(f"=== 第 {rnd}/{args.rounds} 轮：对手池 = {pool} ===")
         model.learn(total_timesteps=args.steps_per_round, reset_num_timesteps=False, progress_bar=False)
         env.close()
         export_weights(model, arch, args.board, opponent_path)  # 快照为下一轮对手

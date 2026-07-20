@@ -44,12 +44,11 @@ class PolicyNet(nn.Module):
         return self.policy(h), self.value(h).squeeze(-1)
 
 
-def load_dataset(pattern: str):
+def load_dataset(pattern: str, reward_scale: float):
     files = sorted(f for part in pattern.split(",") for f in glob.glob(part))
     if not files:
         raise SystemExit(f"没有匹配 {pattern} 的数据文件")
-    obs, actions, masks = [], [], []
-    n_actions = None
+    obs, actions, masks, rets = [], [], [], []
     for f in files:
         with open(f) as fh:
             for line in fh:
@@ -62,14 +61,12 @@ def load_dataset(pattern: str):
                 obs.append(d["obs"])
                 actions.append(d["action"])
                 masks.append(legal)
-                if n_actions is None:
-                    n_actions = max(legal) + 1
-                else:
-                    n_actions = max(n_actions, max(legal) + 1)
+                rets.append(d.get("ret", 0.0) / reward_scale)
     X = np.asarray(obs, dtype=np.float32)
     y = np.asarray(actions, dtype=np.int64)
+    R = np.asarray(rets, dtype=np.float32)
     print(f"读入 {len(files)} 个文件：{len(X)} 样本，obs 维度 {X.shape[1]}")
-    return X, y, masks, files
+    return X, y, masks, R
 
 
 def build_mask_matrix(masks: list[list[int]], n_actions: int) -> np.ndarray:
@@ -105,10 +102,12 @@ def main() -> None:
     ap.add_argument("--out", default="src/ai/weights/policy-classic.json")
     ap.add_argument("--board", default="classic")
     ap.add_argument("--actions", type=int, default=94, help="动作空间大小（classic=94）")
-    ap.add_argument("--hidden", default="128,128")
+    ap.add_argument("--hidden", default="256,256")
     ap.add_argument("--epochs", type=int, default=40)
     ap.add_argument("--batch", type=int, default=256)
     ap.add_argument("--lr", type=float, default=1e-3)
+    ap.add_argument("--vf-coef", type=float, default=0.5, help="价值头损失权重（0 关闭）")
+    ap.add_argument("--reward-scale", type=float, default=30.0, help="ret 归一化除数（与 env-server 一致）")
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--parity-fixture", default="tests/fixtures/policy-parity.json")
     args = ap.parse_args()
@@ -116,7 +115,7 @@ def main() -> None:
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
 
-    X, y, masks, _ = load_dataset(args.data)
+    X, y, masks, R = load_dataset(args.data, args.reward_scale)
     n_actions = args.actions
     M = build_mask_matrix(masks, n_actions)
 
@@ -131,21 +130,24 @@ def main() -> None:
     Xt = torch.from_numpy(X)
     yt = torch.from_numpy(y)
     Mt = torch.from_numpy(M)
+    Rt = torch.from_numpy(R)
     NEG = -1e9
 
-    def masked_logits(batch_idx: torch.Tensor) -> torch.Tensor:
-        logits, _ = model(Xt[batch_idx])
-        return logits.masked_fill(~Mt[batch_idx], NEG)
+    def forward_masked(batch_idx: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        logits, value = model(Xt[batch_idx])
+        return logits.masked_fill(~Mt[batch_idx], NEG), value
 
-    def val_acc() -> float:
+    def validate() -> tuple[float, float]:
         model.eval()
         with torch.no_grad():
-            hits = 0
+            hits, mae = 0, 0.0
             for s in range(0, len(val), 4096):
                 b = torch.from_numpy(val[s : s + 4096])
-                hits += (masked_logits(b).argmax(-1) == yt[b]).sum().item()
+                logits, value = forward_masked(b)
+                hits += (logits.argmax(-1) == yt[b]).sum().item()
+                mae += (value - Rt[b]).abs().sum().item()
         model.train()
-        return hits / len(val)
+        return hits / len(val), mae / len(val)
 
     best_acc, best_state = 0.0, None
     steps_per_epoch = math.ceil(len(tr) / args.batch)
@@ -154,13 +156,19 @@ def main() -> None:
         total_loss = 0.0
         for s in range(0, len(perm), args.batch):
             b = torch.from_numpy(perm[s : s + args.batch])
-            loss = nn.functional.cross_entropy(masked_logits(b), yt[b])
+            logits, value = forward_masked(b)
+            loss = nn.functional.cross_entropy(logits, yt[b])
+            if args.vf_coef > 0:
+                loss = loss + args.vf_coef * nn.functional.smooth_l1_loss(value, Rt[b])
             opt.zero_grad()
             loss.backward()
             opt.step()
             total_loss += loss.item()
-        acc = val_acc()
-        print(f"epoch {epoch}/{args.epochs}  loss {total_loss / steps_per_epoch:.4f}  val-acc {acc * 100:.2f}%")
+        acc, vmae = validate()
+        print(
+            f"epoch {epoch}/{args.epochs}  loss {total_loss / steps_per_epoch:.4f}"
+            f"  val-acc {acc * 100:.2f}%  val-V-MAE {vmae * args.reward_scale:.1f}分"
+        )
         if acc > best_acc:
             best_acc = acc
             best_state = {k: v.clone() for k, v in model.state_dict().items()}

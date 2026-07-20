@@ -19,6 +19,7 @@ interface Args {
   board: string;
   seed: number;
   traj?: string;
+  labelBot?: string;
   rotate: boolean;
 }
 
@@ -32,6 +33,7 @@ function parseArgs(argv: string[]): Args {
     else if (a === '--board') args.board = next();
     else if (a === '--seed') args.seed = parseInt(next(), 10);
     else if (a === '--traj') args.traj = next();
+    else if (a === '--label-bot') args.labelBot = next();
     else if (a === '--no-rotate') args.rotate = false;
   }
   return args;
@@ -42,6 +44,7 @@ function playGame(
   board: string,
   seed: number,
   trajFd?: number,
+  labelBot?: Bot,
 ): GameState {
   const boardDef = board.startsWith('random')
     ? randomMixedBoard(seed)
@@ -49,6 +52,9 @@ function playGame(
   const state = newGame(configForBoard(boardDef, bots.length, seed));
   const codec = makeCodec(boardDef);
   const rands = bots.map((_, i) => makeRand(seed * 7919 + i));
+  const labelRand = makeRand(seed * 7919 + 97);
+  // 终局才知道回报，先缓存本局记录，游戏结束时补上 ret 一并写出
+  const pending: { actor: number; record: Record<string, unknown> }[] = [];
   let steps = 0;
   while (state.phase !== 'gameOver') {
     if (++steps > 100000) throw new Error('game did not terminate');
@@ -58,22 +64,37 @@ function playGame(
       const mask = legalActionMask(state, codec);
       const legal: number[] = [];
       for (let i = 0; i < mask.length; i++) if (mask[i]) legal.push(i);
-      // 同步写：主循环不让出事件循环，异步流会把全部轨迹缓存在内存里直到结束
-      writeSync(
-        trajFd,
-        JSON.stringify({
+      // DAgger 模式：对局按 bots 走（学生访问的状态分布），标签取教师动作
+      const label = labelBot ? labelBot.chooseAction(state, actor, labelRand) : action;
+      pending.push({
+        actor,
+        record: {
           seed,
           turn: state.turn,
           actor,
           bot: bots[actor]!.name,
           // 4 位小数足够训练用，可显著压缩文件体积
           obs: Array.from(encodeObservation(state, actor), (v) => Math.round(v * 10000) / 10000),
-          action: codec.actionToIndex(action),
+          action: codec.actionToIndex(label),
           legal,
-        }) + '\n',
-      );
+        },
+      });
     }
     applyActionInPlace(state, action);
+  }
+  if (trajFd !== undefined && pending.length > 0) {
+    const scores = state.finalScores!;
+    // ret：决策者视角的终局分差（与最强对手比；单人局为自身得分），价值头训练用
+    const rets = scores.map((s, p) => {
+      if (scores.length === 1) return s;
+      let bestOther = -Infinity;
+      for (let i = 0; i < scores.length; i++) if (i !== p && scores[i]! > bestOther) bestOther = scores[i]!;
+      return s - bestOther;
+    });
+    // 同步写：主循环不让出事件循环，异步流会把全部轨迹缓存在内存里直到结束
+    for (const { actor, record } of pending) {
+      writeSync(trajFd, JSON.stringify({ ...record, ret: rets[actor] }) + '\n');
+    }
   }
   return state;
 }
@@ -94,6 +115,16 @@ function main(): void {
     trajFd = openSync(args.traj, 'w');
   }
 
+  let labelBot: Bot | undefined;
+  if (args.labelBot) {
+    const factory = BOT_REGISTRY[args.labelBot];
+    if (!factory) {
+      console.error(`未知标注机器人 "${args.labelBot}"`);
+      process.exit(1);
+    }
+    labelBot = factory(); // 内置机器人无跨局状态，可整场复用
+  }
+
   const n = botNames.length;
   const wins = new Array<number>(n).fill(0);
   const scoreSum = new Array<number>(n).fill(0);
@@ -105,7 +136,7 @@ function main(): void {
     // 轮换座位消除先手优势：第 g 局第 i 个座位由 bot[(i+g)%n] 执掌。
     const offset = args.rotate ? g % n : 0;
     const seatBots = botNames.map((_, i) => BOT_REGISTRY[botNames[(i + offset) % n]!]!());
-    const final = playGame(seatBots, args.board, args.seed + g, trajFd);
+    const final = playGame(seatBots, args.board, args.seed + g, trajFd, labelBot);
     totalTurns += final.turn;
     final.finalScores!.forEach((s, seat) => {
       const botIdx = (seat + offset) % n;

@@ -17,6 +17,7 @@
 import { createInterface } from 'node:readline';
 import { readFileSync } from 'node:fs';
 import { newGame, currentActor, legalActions, applyActionInPlace, configForBoard } from '../core/engine';
+import { computeScore } from '../core/scoring';
 import { BOARD_PRESETS } from '../core/board';
 import type { BoardDef, GameState } from '../core/types';
 import { BOT_REGISTRY, makeRand, type Bot } from '../ai/bots';
@@ -31,15 +32,18 @@ interface Env {
   opponent: Bot;
   rand: () => number;
   seedBase: number;
+  /** 势函数塑形的上一决策点势能。 */
+  potential: number;
 }
 
 let board: BoardDef;
 let codec: ActionCodec;
 let envs: Env[] = [];
-let sharedOpponent: Bot;
+let opponentPool: Bot[] = [];
+let shaping = false;
 const REWARD_SCALE = 30;
 
-/** 内置机器人均无跨局状态，各环境共享一个实例即可。 */
+/** 内置机器人均无跨局状态，各环境共享实例即可。 */
 function makeOpponent(spec: string): Bot {
   if (spec.startsWith('policy:')) {
     const weights = JSON.parse(readFileSync(spec.slice('policy:'.length), 'utf8')) as SerializedMLP;
@@ -50,11 +54,18 @@ function makeOpponent(spec: string): Bot {
   return factory();
 }
 
+/** 当前局面的势能：双方即时得分差 / REWARD_SCALE。 */
+function potentialOf(env: Env): number {
+  const me = computeScore(env.state, env.agentSeat).total;
+  const opp = computeScore(env.state, 1 - env.agentSeat).total;
+  return (me - opp) / REWARD_SCALE;
+}
+
 function resetEnv(env: Env): void {
   const seed = env.seedBase + env.episode;
   env.state = newGame(configForBoard(board, 2, seed));
   env.agentSeat = env.episode % 2; // 座位轮换
-  env.opponent = sharedOpponent;
+  env.opponent = opponentPool[env.episode % opponentPool.length]!; // 对手池逐局轮转
   env.rand = makeRand(seed * 7919 + 13);
   env.episode += 1;
 }
@@ -96,6 +107,7 @@ function resetToDecision(env: Env): void {
   do {
     resetEnv(env);
   } while (advance(env));
+  env.potential = shaping ? potentialOf(env) : 0;
 }
 
 function handle(msg: Record<string, unknown>): unknown {
@@ -103,7 +115,9 @@ function handle(msg: Record<string, unknown>): unknown {
   if (cmd === 'init') {
     board = BOARD_PRESETS[(msg['board'] as string) ?? 'classic']!;
     codec = makeCodec(board);
-    sharedOpponent = makeOpponent((msg['opponent'] as string) ?? 'heuristic');
+    // 对手池：逗号分隔，逐局轮转（如 "heuristic,policy:out/snap.json"）
+    opponentPool = (((msg['opponent'] as string) ?? 'heuristic').split(',')).map(makeOpponent);
+    shaping = (msg['shaping'] as boolean) ?? false;
     const numEnvs = (msg['numEnvs'] as number) ?? 16;
     const seed = (msg['seed'] as number) ?? 1;
     envs = Array.from({ length: numEnvs }, (_, i) => {
@@ -114,6 +128,7 @@ function handle(msg: Record<string, unknown>): unknown {
         opponent: undefined as unknown as Bot,
         rand: () => 0,
         seedBase: seed + i * 1_000_000,
+        potential: 0,
       };
       return env;
     });
@@ -136,9 +151,15 @@ function handle(msg: Record<string, unknown>): unknown {
       applyActionInPlace(env.state, codec.indexToAction(actions[i]!));
       const over = advance(env);
       if (over) {
-        reward.push(terminalReward(env));
+        // 塑形下终局奖励扣掉已发放的势能，整局奖励和仍等于终局分差
+        reward.push(terminalReward(env) - env.potential);
         done.push(true);
         resetToDecision(env);
+      } else if (shaping) {
+        const p = potentialOf(env);
+        reward.push(p - env.potential);
+        env.potential = p;
+        done.push(false);
       } else {
         reward.push(0);
         done.push(false);
