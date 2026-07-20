@@ -123,5 +123,9 @@ pnpm arena -- --games 2000 --bots policy,heuristic
 | heuristic vs random（classic） | 99.8% : 0.2% | 47 : 1 |
 | heuristic vs greedy（longo，300 局） | 67% : 33% | 83 : 68 |
 | heuristic vs greedy（big-points，300 局） | 50% : 50% | 170 : 171 |
+| rollout vs heuristic（classic，100 局） | 69% : 31% | 70 : 58 |
+| rollout-lite vs heuristic（classic，100 局） | 57% : 43% | 63 : 60 |
 
-超过 heuristic 即说明策略学到了非平凡的跳格/锁行权衡。
+超过 heuristic 即说明策略学到了非平凡的跳格/锁行权衡；
+`rollout`（蒙特卡洛前瞻，约 1.6s/局）是当前最强基线，可作为 RL 的教师策略
+（`arena --traj` 导它的轨迹做行为克隆 warm start）与训练后的对战及格线。

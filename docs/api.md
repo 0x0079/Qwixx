@@ -127,16 +127,21 @@ interface Bot {
 }
 
 makeRand(seed)     // 种子化 rand() 闭包，保证对局可复现
-BOT_REGISTRY       // { random, greedy, heuristic } 工厂表
+BOT_REGISTRY       // { random, greedy, heuristic, rollout, rollout-lite } 工厂表
 ```
 
 自定义机器人只需实现 `Bot` 接口并注册进 `BOT_REGISTRY`（竞技场与 UI 会自动可选）。
-三个内置机器人：
+内置机器人：
 
 - `RandomBot`：合法动作均匀随机（下限基线）；
 - `GreedyBot(maxSkip=1)`：跳格 ≤1 时取边际得分最高的划记，主动玩家兜底避免失误；
 - `HeuristicBot(wSkip=1.8, markBonus=1, baseMaxSkip=1)`：边际得分 − 跳格代价（随进度放宽）
-  + 锁行奖励 + 硬性跳格上限，参数经对战扫描调优。
+  + 锁行奖励 + 硬性跳格上限，参数经对战扫描调优；
+- `RolloutBot(rollouts=32, policy=HeuristicBot)`（`src/ai/rollout.ts`）：蒙特卡洛 rollout
+  搜索——对每个合法动作重随机化未来骰子并用 policy 模拟 N 局到终局，取平均分差最高者。
+  所有候选动作共用同一组骰子种子（公共随机数）做成对比较以消方差。
+  `rollout` 为 N=32 强档，`rollout-lite` 为 N=16 低延迟档（适合 UI 实时对局）。
+  另导出 `cloneForSearch(state)`：共享 config 引用的快速状态克隆，供搜索/训练复用。
 
 ## RL 编码（src/ai/encode.ts）
 
