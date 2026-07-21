@@ -44,36 +44,51 @@ class PolicyNet(nn.Module):
         return self.policy(h), self.value(h).squeeze(-1)
 
 
-def load_dataset(pattern: str, reward_scale: float):
+def load_dataset(pattern: str, reward_scale: float, n_actions: int):
+    """返回 (X float32, y int64, M bool[N,A], R float32)。
+
+    支持两种数据源，按扩展名自动识别：
+    - .npz：training/pack.py 打包的压缩格式，加载约 0.65s（推荐）；
+    - .jsonl：竞技场原始轨迹，需逐行解析（约 35s / 298MB）。
+    混用时 npz 与 jsonl 可同时给。
+    """
     files = sorted(f for part in pattern.split(",") for f in glob.glob(part))
     if not files:
         raise SystemExit(f"没有匹配 {pattern} 的数据文件")
-    obs, actions, masks, rets = [], [], [], []
+
+    Xs, ys, Ms, Rs = [], [], [], []
     for f in files:
-        with open(f) as fh:
-            for line in fh:
-                if not line.strip():
-                    continue
-                d = json.loads(line)
-                legal = d["legal"]
-                if len(legal) < 2:  # 无决策价值的时刻
-                    continue
-                obs.append(d["obs"])
-                actions.append(d["action"])
-                masks.append(legal)
-                rets.append(d.get("ret", 0.0) / reward_scale)
-    X = np.asarray(obs, dtype=np.float32)
-    y = np.asarray(actions, dtype=np.int64)
-    R = np.asarray(rets, dtype=np.float32)
+        if f.endswith(".npz"):
+            z = np.load(f)
+            a = int(z["n_actions"]) if "n_actions" in z else n_actions
+            Xs.append(z["obs"].astype(np.float32))
+            ys.append(z["act"].astype(np.int64))
+            Rs.append(z["ret"].astype(np.float32))
+            Ms.append(np.unpackbits(z["mask"], axis=1)[:, :a].astype(bool))
+        else:
+            obs, act, ret, mask = [], [], [], []
+            with open(f) as fh:
+                for line in fh:
+                    if not line.strip():
+                        continue
+                    d = json.loads(line)
+                    legal = d["legal"]
+                    if len(legal) < 2:  # 无决策价值的时刻
+                        continue
+                    obs.append(d["obs"])
+                    act.append(d["action"])
+                    ret.append(d.get("ret", 0.0) / reward_scale)
+                    m = np.zeros(n_actions, dtype=bool)
+                    m[legal] = True
+                    mask.append(m)
+            Xs.append(np.asarray(obs, np.float32))
+            ys.append(np.asarray(act, np.int64))
+            Rs.append(np.asarray(ret, np.float32))
+            Ms.append(np.asarray(mask, dtype=bool))
+
+    X, y, M, R = np.concatenate(Xs), np.concatenate(ys), np.concatenate(Ms), np.concatenate(Rs)
     print(f"读入 {len(files)} 个文件：{len(X)} 样本，obs 维度 {X.shape[1]}")
-    return X, y, masks, R
-
-
-def build_mask_matrix(masks: list[list[int]], n_actions: int) -> np.ndarray:
-    M = np.zeros((len(masks), n_actions), dtype=bool)
-    for i, legal in enumerate(masks):
-        M[i, legal] = True
-    return M
+    return X, y, M, R
 
 
 def f32_b64(a: np.ndarray) -> str:
@@ -115,9 +130,8 @@ def main() -> None:
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
 
-    X, y, masks, R = load_dataset(args.data, args.reward_scale)
     n_actions = args.actions
-    M = build_mask_matrix(masks, n_actions)
+    X, y, M, R = load_dataset(args.data, args.reward_scale, n_actions)
 
     # 10% 验证集
     idx = np.random.permutation(len(X))

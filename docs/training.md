@@ -71,16 +71,23 @@ for i in 0 1 2 3; do
     --traj out/bc-$i.jsonl --seed $((10000 + i * 300)) &
 done; wait
 
-# 2) 训练（torch，CPU 几分钟）并导出 TS 可加载的权重 + 前向一致性 fixture
+# 2) 打包成压缩 npz（一次性，298MB JSONL → ~5MB，加载 35s → 0.65s）
 pip install -r training/requirements.txt
-python3 training/bc_train.py --data "out/bc-*.jsonl" \
+python3 training/pack.py --data "out/bc-*.jsonl" --out out/train.npz
+
+# 3) 训练（torch，CPU 几分钟）并导出 TS 可加载的权重 + 前向一致性 fixture
+python3 training/bc_train.py --data out/train.npz \
   --out src/ai/weights/policy-classic.json --board classic
 
-# 3) 验证与评估
+# 4) 验证与评估
 pnpm test                                           # 含 TS↔torch 前向一致性回归
 pnpm arena -- --games 2000 --bots policy,heuristic
 ```
 
+数据格式：竞技场吐流式 JSONL（可 grep、易合并分片）；`pack.py` 转成 float16
+压缩 npz 供训练快速加载（obs 有 91% 是零，被 npz 的 deflate 免费吃掉；
+不耦合观测布局）。`bc_train.py --data` 同时接受 `.npz` 与 `.jsonl`（按扩展名
+识别，可混用），跳过打包直接喂 JSONL 也可，只是每次训练多花约 35s 解析。
 导出格式见 `src/ai/mlp.ts` 头注释（W 为 [in, out] 行主序、Float32 base64）。
 
 当前权重（v3）的训练配置与实测：

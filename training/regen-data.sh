@@ -52,4 +52,7 @@ cp src/ai/weights/policy-classic-v2.json "$WEIGHTS"
  run --games 160 --bots policy,rollout-lite           --label-bot rollout --traj out/mp-d2.jsonl --seed 47000) &
 wait
 
-echo "完成。训练：python3 training/bc_train.py --data \"out/bc2-*.jsonl,out/mp-*.jsonl\" --out out/bc3-candidate.json"
+# ── 打包成压缩 npz（298MB JSONL → ~5MB，训练加载 35s → 0.65s）──────────
+python3 training/pack.py --data "out/bc2-*.jsonl,out/mp-*.jsonl" --out out/train.npz
+
+echo "完成。训练：python3 training/bc_train.py --data out/train.npz --out out/bc3-candidate.json"
