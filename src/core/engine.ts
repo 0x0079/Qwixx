@@ -42,7 +42,11 @@ export function configForBoard(board: BoardDef, numPlayers: number, seed: number
   return config;
 }
 
-export function newGame(config: RulesConfig): GameState {
+/**
+ * 创建新局。`startingPlayer` 只决定谁先掷骰（回合仍按座位顺序轮转），
+ * 不影响座位数组本身，因此可以脱离座位重排独立随机化"先手"。
+ */
+export function newGame(config: RulesConfig, startingPlayer = 0): GameState {
   validateBoard(config.board);
   if (config.numPlayers < 1) throw new Error('at least 1 player required');
   const players: PlayerState[] = Array.from({ length: config.numPlayers }, () => ({
@@ -63,7 +67,7 @@ export function newGame(config: RulesConfig): GameState {
     players,
     lockedRows: config.board.rows.map(() => false),
     removedColors: [],
-    activePlayer: 0,
+    activePlayer: startingPlayer,
     dice: { white: [1, 1], colors: {} },
     phase: 'whiteChoice',
     whiteQueue: [],

@@ -281,6 +281,7 @@ summary:focus-visible,
 .seat-shuffle .icon { width: 14px; height: 14px; }
 .seat-toggle { display: inline-flex; align-items: center; gap: 6px; color: #525c55; font-size: 11px; font-weight: 700; cursor: pointer; }
 .seat-toggle input { width: 15px; height: 15px; margin: 0; accent-color: var(--green); cursor: pointer; }
+.first-player-controls { margin-top: -1px; }
 .seat-first {
   margin-left: 5px;
   padding: 1px 4px;
@@ -595,6 +596,8 @@ summary:focus-visible,
 .action-copy strong { font-size: 14px; }
 .action-copy small { color: var(--muted); font-size: 10px; line-height: 1.4; }
 .choice-count { margin-left: auto; padding: 5px 10px; border-radius: 999px; background: white; color: var(--green); font-size: 10px; font-weight: 750; white-space: nowrap; }
+.auto-skip-toggle { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; padding: 5px 10px; border-radius: 999px; background: white; color: #525c55; font-size: 10px; font-weight: 700; white-space: nowrap; cursor: pointer; }
+.auto-skip-toggle input { width: 14px; height: 14px; margin: 0; accent-color: var(--green); cursor: pointer; }
 .thinking { display: flex; gap: 4px; margin-left: auto; padding: 10px; }
 .thinking i { width: 6px; height: 6px; border-radius: 50%; background: #7e9b87; animation: thinking 1.15s ease-in-out infinite; }
 .thinking i:nth-child(2) { animation-delay: 160ms; }
@@ -973,6 +976,7 @@ button.variant-chip[aria-pressed="true"], .locate-chip[aria-pressed="true"] { bo
   .action-icon { width: 38px; height: 38px; }
   .action-copy { width: auto; overflow-wrap: anywhere; }
   .choice-count { grid-column: 2; justify-self: start; margin-left: 0; }
+  .auto-skip-toggle { grid-column: 2; justify-self: start; margin-left: 0; }
   .thinking { grid-column: 2; justify-self: start; margin-left: 0; }
   .scoreboard-strip { grid-template-columns: 1fr 1fr; }
   .scoreboard-strip > div { grid-template-columns: 14px 8px minmax(0, 1fr) 30px; }

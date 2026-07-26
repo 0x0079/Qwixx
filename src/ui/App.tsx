@@ -36,8 +36,10 @@ interface Setup {
   players: PlayerSetup[];
   boardId: string;
   seed: string;
-  /** 开局时按本局种子确定性打乱座位（先手顺序、Connected 卡面都取决于座位）。 */
+  /** 开局时按本局种子确定性打乱座位（会连带影响 Connected 变体的卡面分配）。 */
   randomSeats: boolean;
+  /** 开局时按本局种子随机指定先手玩家；不移动座位，只改变谁先掷骰。默认开启。 */
+  randomFirstPlayer: boolean;
 }
 
 interface BoardOption {
@@ -268,6 +270,16 @@ function shuffleSeats(players: PlayerSetup[], seed: number): PlayerSetup[] {
   return out;
 }
 
+/**
+ * 用给定种子确定性地选出先手玩家下标（不改变座位数组，只挑一个起始下标）。
+ * 用独立的种子扰动，避免和 shuffleSeats 产生同源的重复结果。
+ */
+function pickFirstPlayer(count: number, seed: number): number {
+  if (count <= 1) return 0;
+  const r = nextRand(seedToState(seed ^ 0x4a17c2e9));
+  return Math.floor(r.value * count);
+}
+
 export function App() {
   const [setup, setSetup] = useState<Setup>({
     players: [
@@ -277,6 +289,7 @@ export function App() {
     boardId: 'classic',
     seed: '',
     randomSeats: false,
+    randomFirstPlayer: true,
   });
   const [game, setGame] = useState<GameState | null>(null);
   /** 本局实际就座顺序（可能与设置页顺序不同）。 */
@@ -292,11 +305,17 @@ export function App() {
       ? randomMixedBoard(matchSeed)
       : BOARD_PRESETS[setup.boardId]!;
     const seated = setup.randomSeats ? shuffleSeats(setup.players, matchSeed) : setup.players;
+    const startingPlayer = setup.randomFirstPlayer ? pickFirstPlayer(seated.length, matchSeed) : 0;
     setRoster(seated);
-    setLog(setup.randomSeats
-      ? [`🎲 座位已随机：${seated.map((player, i) => `${i + 1}. ${player.name}`).join(' → ')}`]
-      : []);
-    setGame(newGame(configForBoard(board, seated.length, matchSeed)));
+    const entries: string[] = [];
+    if (setup.randomSeats) {
+      entries.push(`🎲 座位已随机：${seated.map((player, i) => `${i + 1}. ${player.name}`).join(' → ')}`);
+    }
+    if (setup.randomFirstPlayer) {
+      entries.push(`🎯 先手已随机：${seated[startingPlayer]!.name}（座位 ${startingPlayer + 1}）`);
+    }
+    setLog(entries);
+    setGame(newGame(configForBoard(board, seated.length, matchSeed), startingPlayer));
   };
 
   if (!game) {
@@ -361,7 +380,7 @@ function SetupScreen({ setup, setSetup, onStart }: {
             <div className="seat-controls">
               <div className="seat-controls-copy">
                 <strong>座位顺序</strong>
-                <small>座位 1 先手；Connected 变体还按座位分配 A–E 卡面。</small>
+                <small>Connected 变体按座位分配 A–E 卡面；先手另见下方设置。</small>
               </div>
               <button
                 type="button"
@@ -382,6 +401,21 @@ function SetupScreen({ setup, setSetup, onStart }: {
               </label>
             </div>
 
+            <div className="seat-controls first-player-controls">
+              <div className="seat-controls-copy">
+                <strong>先手顺序</strong>
+                <small>先手只决定谁先掷骰，不会移动座位，也不影响 Connected 卡面分配。</small>
+              </div>
+              <label className="seat-toggle">
+                <input
+                  type="checkbox"
+                  checked={setup.randomFirstPlayer}
+                  onChange={(e) => setSetup({ ...setup, randomFirstPlayer: e.target.checked })}
+                />
+                <span>每局开始时随机先手</span>
+              </label>
+            </div>
+
             <div className="player-list">
               {setup.players.map((player, i) => (
                 <div className="player-row" key={i}>
@@ -391,7 +425,7 @@ function SetupScreen({ setup, setSetup, onStart }: {
                   <div className="player-identity">
                     <label htmlFor={`player-name-${i}`}>
                       座位 {i + 1}
-                      {i === 0 && !setup.randomSeats && <em className="seat-first">先手</em>}
+                      {i === 0 && !setup.randomFirstPlayer && <em className="seat-first">先手</em>}
                     </label>
                     <input
                       id={`player-name-${i}`}
@@ -512,8 +546,12 @@ function SetupScreen({ setup, setSetup, onStart }: {
               ))}
               <p className="roster-seat-note">
                 {setup.randomSeats
-                  ? '开始时会按本局种子随机就座，先手随之改变。'
-                  : `按当前顺序就座，${setup.players[0]?.name.trim() || '座位 1'} 先手。`}
+                  ? '开始时会按本局种子随机就座（Connected 卡面随之变化）。'
+                  : '按当前顺序就座。'}
+                {' '}
+                {setup.randomFirstPlayer
+                  ? '先手也会随机决定，座位不受影响。'
+                  : `${setup.players[0]?.name.trim() || '座位 1'} 先手。`}
               </p>
             </div>
 
@@ -588,6 +626,8 @@ function GameScreen({ game, setGame, roster, seatsShuffled, log, setLog, onExit,
   const bots = useRef<(Bot | null)[]>([]);
   const rands = useRef<(() => number)[]>([]);
   const [showExitConfirm, setShowExitConfirm] = useState(false);
+  /** 没有可划记格子时是否自动跳过，省得每个人都要手动点一次。 */
+  const [autoSkip, setAutoSkip] = useState(false);
 
   useEffect(() => {
     bots.current = roster.map((p) => (p.kind === 'human' ? null : BOT_REGISTRY[p.kind]!()));
@@ -753,6 +793,15 @@ function GameScreen({ game, setGame, roster, seatsShuffled, log, setLog, onExit,
   const skipAction = legal.find((action) => action.type === 'skipWhite' || action.type === 'skipColor');
   const lockedCount = game.lockedRows.filter(Boolean).length;
 
+  useEffect(() => {
+    if (game.phase === 'gameOver') return;
+    if (!autoSkip || !isHumanTurn || legalMarks > 0 || !skipAction) return;
+    const timer = window.setTimeout(() => step(skipAction), AI_DELAY_MS);
+    return () => window.clearTimeout(timer);
+    // step follows the current immutable game snapshot.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [game, autoSkip]);
+
   return (
     <main className="game-page">
       <header className="game-header">
@@ -801,9 +850,19 @@ function GameScreen({ game, setGame, roster, seatsShuffled, log, setLog, onExit,
             <div className="action-copy">
               <span>{isHumanTurn ? '轮到你行动' : '等待玩家行动'}</span>
               <strong>{actionTitle(game, roster, actor, legalMarks, isHumanTurn)}</strong>
-              <small>{actionDescription(game, legalMarks, isHumanTurn)}</small>
+              <small>{actionDescription(game, legalMarks, isHumanTurn, autoSkip)}</small>
             </div>
             {isHumanTurn && legalMarks > 0 && <span className="choice-count">{legalMarks} 个可选格</span>}
+            {isHumanTurn && legalMarks === 0 && skipAction && (
+              <label className="auto-skip-toggle" title="没有可划记的格子时自动跳过，无需每次手动点击">
+                <input
+                  type="checkbox"
+                  checked={autoSkip}
+                  onChange={(e) => setAutoSkip(e.target.checked)}
+                />
+                <span>自动跳过</span>
+              </label>
+            )}
             {!isHumanTurn && <span className="thinking"><i /><i /><i /></span>}
           </section>
         </>
@@ -1665,10 +1724,13 @@ function actionTitle(game: GameState, roster: PlayerSetup[], actor: number, lega
     : `${name}，选择一个白骰 + 彩骰组合`;
 }
 
-function actionDescription(game: GameState, legalMarks: number, isHumanTurn: boolean): string {
+function actionDescription(game: GameState, legalMarks: number, isHumanTurn: boolean, autoSkip: boolean): string {
   if (!isHumanTurn) return 'AI 完成选择后会自动继续，请稍候。';
   if (game.phase === 'bonusChoice') return '奖励划记必须执行；可选格已用绿色描边标出。';
-  if (legalMarks === 0) return game.phase === 'whiteChoice' ? '跳过不会受到惩罚。' : '结束回合；若本回合没有划记，将记录一次失误。';
+  if (legalMarks === 0) {
+    const base = game.phase === 'whiteChoice' ? '跳过不会受到惩罚。' : '结束回合；若本回合没有划记，将记录一次失误。';
+    return autoSkip ? `${base}已开启自动跳过，即将自动继续。` : base;
+  }
   return game.phase === 'whiteChoice'
     ? '记分卡上带绿色描边的格子可以点击；非主动玩家跳过无惩罚。'
     : '只可划对应彩骰颜色的格子，也可以选择结束本回合。';
