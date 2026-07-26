@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import type { Action, BonusSymbol, GameState } from '../core/types';
+import type { Action, BonusSymbol, CellRef, Color, GameState } from '../core/types';
 import {
   newGame,
   currentActor,
@@ -10,7 +10,19 @@ import {
   configForBoard,
 } from '../core/engine';
 import { BOARD_PRESETS, randomMixedBoard } from '../core/board';
-import { computeScore, pointsForCount } from '../core/scoring';
+import { computeScore, pointsForCount, type ScoreBreakdown } from '../core/scoring';
+import { nextRand, seedToState } from '../core/rng';
+import {
+  chainLinks,
+  chainPartner,
+  doubleCandidates,
+  nextRewardColor,
+  rewardTrack,
+  sheetLabel,
+  swapSlots,
+  symbolPairAt,
+  symbolPairs,
+} from '../core/variants';
 import { BOT_REGISTRY, makeRand, type Bot } from '../ai/bots';
 
 type PlayerKind = 'human' | 'random' | 'greedy' | 'heuristic' | 'policy' | 'rollout-lite' | 'rollout';
@@ -24,6 +36,8 @@ interface Setup {
   players: PlayerSetup[];
   boardId: string;
   seed: string;
+  /** 开局时按本局种子确定性打乱座位（先手顺序、Connected 卡面都取决于座位）。 */
+  randomSeats: boolean;
 }
 
 interface BoardOption {
@@ -32,6 +46,8 @@ interface BoardOption {
   tag: string;
   description: string;
   meta: string;
+  /** 该记分卡的连锁/特殊机制，开局前先讲清楚。 */
+  mechanics?: string[];
 }
 
 type SpecialMarkerKind = 'multiplier' | 'trigger' | 'symbol' | 'steps' | 'chain';
@@ -43,6 +59,19 @@ interface SpecialMarker {
   legend: string;
 }
 
+/** 一个格子上的变体信息：角标、配对关系与说明文字。 */
+interface CellHint {
+  marker?: SpecialMarker;
+  /** 角标改用这个颜色（Bonus A 用它显示"这次会拿到哪种颜色"）。 */
+  markerColor?: string;
+  /** 互为一对的格子（符号对、连锁对）。 */
+  peers?: CellRef[];
+  /** 这一对已经凑齐。 */
+  paired?: boolean;
+  /** 覆盖角标自带说明的完整描述。 */
+  description?: string;
+}
+
 const BONUS_SYMBOL_MARKERS: Record<BonusSymbol, SpecialMarker> = {
   circle: { text: '○', kind: 'symbol', description: '圆形奖励：集齐一对后在最少行追加 2 格', legend: '最少行 +2' },
   diamond: { text: '◇', kind: 'symbol', description: '菱形奖励：集齐一对后四行各追加 1 格', legend: '每行 +1' },
@@ -50,6 +79,8 @@ const BONUS_SYMBOL_MARKERS: Record<BonusSymbol, SpecialMarker> = {
   octagon: { text: '⬡', kind: 'symbol', description: '八边形奖励：集齐一对后终局加 13 分', legend: '终局 +13' },
   star: { text: '✹', kind: 'symbol', description: '星形奖励：集齐一对后免除失误扣分', legend: '免失误扣分' },
 };
+
+const SYMBOL_ORDER: BonusSymbol[] = ['circle', 'diamond', 'square', 'octagon', 'star'];
 
 const KIND_LABEL: Record<PlayerKind, string> = {
   human: '人类玩家',
@@ -99,6 +130,11 @@ const BOARD_OPTIONS: BoardOption[] = [
     tag: '长局',
     description: '更长的数字行、八面骰与专属幸运数字。',
     meta: '2–16 · 幸运数字',
+    mechanics: [
+      '每名玩家开局分到 2 个专属幸运数字（卡片右上角标出）。',
+      '白骰和等于幸运数字时，可改划“划记最少的行”的下一格。',
+      '行尾两格任一可锁行，锁行门槛提高到已划 6 格。',
+    ],
   },
   {
     id: 'big-points',
@@ -106,6 +142,11 @@ const BOARD_OPTIONS: BoardOption[] = [
     tag: '高分',
     description: '加入双色奖励行，制造更多连锁得分机会。',
     meta: '奖励行 · 15 格计分',
+    mechanics: [
+      '奖励行的圆格夹在两行之间，上下半圆就是它相邻的两行颜色。',
+      '先划过相邻的普通格，之后再掷出同一个数字才能划奖励格。',
+      '一个奖励格同时计入上下两行的划记数，每行最多计 15 个。',
+    ],
   },
   {
     id: 'double-a',
@@ -113,6 +154,11 @@ const BOARD_OPTIONS: BoardOption[] = [
     tag: '双重划记',
     description: '每行最近划下的数字可以再次命中，单行最高 136 分。',
     meta: '重复最近格 · 锁行门槛 7',
+    mechanics: [
+      '每行“最右侧那个已划的数字”可以被划第二次（显示为 ××）。',
+      '第二个叉照常计分，但不推进位置、也不解锁更靠右的格子。',
+      '卡片上会实时列出当前可再划的格子。',
+    ],
   },
   {
     id: 'double-b',
@@ -120,6 +166,10 @@ const BOARD_OPTIONS: BoardOption[] = [
     tag: '乘数格',
     description: '每行四个官方双倍格，一次命中会计作两个叉。',
     meta: '四个双倍格 · 16 格计分',
+    mechanics: [
+      '带 ×2 角标的格子划一次直接计作两个叉，无需额外操作。',
+      '双倍不改变锁行门槛之外的位置规则，仍然从左到右。',
+    ],
   },
   {
     id: 'bonus-a',
@@ -127,6 +177,12 @@ const BOARD_OPTIONS: BoardOption[] = [
     tag: '连锁',
     description: '命中奖励格后按颜色轨立刻追加划记，并可能连续触发。',
     meta: '12 个奖励格 · 强制追加',
+    mechanics: [
+      '划下带 ◆ 的格子会消费“奖励轨”最左边还没用掉的一格。',
+      '拿到的颜色由奖励轨顺序决定，与你划的是哪个 ◆ 无关。',
+      '追加划记是强制的，且可能再次踩到 ◆ 形成连锁。',
+      '某色行一旦被锁定，奖励轨上该颜色的格子全部作废。',
+    ],
   },
   {
     id: 'bonus-b',
@@ -134,6 +190,11 @@ const BOARD_OPTIONS: BoardOption[] = [
     tag: '组合',
     description: '凑齐成对符号，解锁追加划记、加分、翻倍或免扣分。',
     meta: '5 种成对符号',
+    mechanics: [
+      '同一个符号在卡面上出现两次，两个都划到才会激活效果。',
+      '○ 最少行 +2、◇ 每行 +1、□ 最低行翻倍、⬡ +13 分、✹ 免失误扣分。',
+      '○ 与 ◇ 的追加划记是强制的，会立即打断当前选择。',
+    ],
   },
   {
     id: 'connected-steps',
@@ -141,6 +202,11 @@ const BOARD_OPTIONS: BoardOption[] = [
     tag: '阶梯',
     description: '每名玩家使用不同 A–E 卡，阶梯格组成第五个计分组。',
     meta: '11 个阶梯格 · 额外计分',
+    mechanics: [
+      '每个座位拿到不同卡面（A–E），阶梯格位置因此各不相同。',
+      '带“阶”角标的 11 个格子既计入所在颜色行，又另组成第五个计分组。',
+      '阶梯组沿用同一张积分表，全部划满 66 分。',
+    ],
   },
   {
     id: 'connected-chain',
@@ -148,6 +214,11 @@ const BOARD_OPTIONS: BoardOption[] = [
     tag: '连线',
     description: '划下连锁格时，另一端无视常规限制自动划下。',
     meta: 'A–E 卡面 · 自动连锁',
+    mechanics: [
+      '卡面上有 5 对连锁格，带相同编号的两格互为一对。',
+      '划下其中一端，另一端立刻自动划下——不受从左到右的限制。',
+      '每个座位卡面不同，连锁对的位置也不同。',
+    ],
   },
   {
     id: 'x-change',
@@ -155,6 +226,11 @@ const BOARD_OPTIONS: BoardOption[] = [
     tag: '换数',
     description: '白骰阶段可按顺序使用九组交换，改变自己本次的和值。',
     meta: '9 次有序交换机会',
+    mechanics: [
+      '交换轨上有 9 组数字，例如 8↔5：掷出 8 时可当作 5 来划。',
+      '只能从左到右按顺序取用，越过的交换直接作废。',
+      '交换只改变本次可划的数字，不影响计分方式。',
+    ],
   },
   {
     id: 'random',
@@ -172,8 +248,27 @@ const COLOR_CSS: Record<string, string> = {
   blue: '#3971ce',
 };
 
+/** Bonus A 奖励轨按颜色追加划记，颜色到行号的映射与引擎的 COLORS 顺序一致。 */
+const COLOR_ROW: Record<Color, number> = { red: 0, yellow: 1, green: 2, blue: 3 };
+
 const AI_DELAY_MS = 300;
 const randomSeed = () => Math.floor(Math.random() * 1_000_000);
+
+/**
+ * 用给定种子确定性地打乱座位（Fisher–Yates）。
+ * 走核心 RNG 而不是 Math.random，"同一个种子重现同一局"这个约定才对随机座位同样成立。
+ */
+function shuffleSeats(players: PlayerSetup[], seed: number): PlayerSetup[] {
+  const out = [...players];
+  let s = seedToState(seed ^ 0x2f6b1d05);
+  for (let i = out.length - 1; i > 0; i--) {
+    const r = nextRand(s);
+    s = r.state;
+    const j = Math.floor(r.value * (i + 1));
+    [out[i], out[j]] = [out[j]!, out[i]!];
+  }
+  return out;
+}
 
 export function App() {
   const [setup, setSetup] = useState<Setup>({
@@ -183,8 +278,11 @@ export function App() {
     ],
     boardId: 'classic',
     seed: '',
+    randomSeats: false,
   });
   const [game, setGame] = useState<GameState | null>(null);
+  /** 本局实际就座顺序（可能与设置页顺序不同）。 */
+  const [roster, setRoster] = useState<PlayerSetup[]>(setup.players);
   const [log, setLog] = useState<string[]>([]);
 
   const startGame = () => {
@@ -195,8 +293,12 @@ export function App() {
     const board = setup.boardId === 'random'
       ? randomMixedBoard(matchSeed)
       : BOARD_PRESETS[setup.boardId]!;
-    setLog([]);
-    setGame(newGame(configForBoard(board, setup.players.length, matchSeed)));
+    const seated = setup.randomSeats ? shuffleSeats(setup.players, matchSeed) : setup.players;
+    setRoster(seated);
+    setLog(setup.randomSeats
+      ? [`🎲 座位已随机：${seated.map((player, i) => `${i + 1}. ${player.name}`).join(' → ')}`]
+      : []);
+    setGame(newGame(configForBoard(board, seated.length, matchSeed)));
   };
 
   if (!game) {
@@ -207,7 +309,8 @@ export function App() {
     <GameScreen
       game={game}
       setGame={setGame}
-      setup={setup}
+      roster={roster}
+      seatsShuffled={setup.randomSeats}
       log={log}
       setLog={setLog}
       onExit={() => setGame(null)}
@@ -257,6 +360,30 @@ function SetupScreen({ setup, setSetup, onStart }: {
               <span className="section-count">{setup.players.length} / 5</span>
             </div>
 
+            <div className="seat-controls">
+              <div className="seat-controls-copy">
+                <strong>座位顺序</strong>
+                <small>座位 1 先手；Connected 变体还按座位分配 A–E 卡面。</small>
+              </div>
+              <button
+                type="button"
+                className="secondary-button seat-shuffle"
+                disabled={setup.players.length < 2}
+                title={setup.players.length < 2 ? '至少 2 名玩家才能调整座位' : '立即打乱当前座位顺序'}
+                onClick={() => setSetup({ ...setup, players: shuffleSeats(setup.players, randomSeed()) })}
+              >
+                <Icon name="shuffle" /> 随机座位
+              </button>
+              <label className="seat-toggle">
+                <input
+                  type="checkbox"
+                  checked={setup.randomSeats}
+                  onChange={(e) => setSetup({ ...setup, randomSeats: e.target.checked })}
+                />
+                <span>每局开始时随机</span>
+              </label>
+            </div>
+
             <div className="player-list">
               {setup.players.map((player, i) => (
                 <div className="player-row" key={i}>
@@ -264,7 +391,10 @@ function SetupScreen({ setup, setSetup, onStart }: {
                     {player.name.trim().charAt(0) || i + 1}
                   </div>
                   <div className="player-identity">
-                    <label htmlFor={`player-name-${i}`}>座位 {i + 1}</label>
+                    <label htmlFor={`player-name-${i}`}>
+                      座位 {i + 1}
+                      {i === 0 && !setup.randomSeats && <em className="seat-first">先手</em>}
+                    </label>
                     <input
                       id={`player-name-${i}`}
                       value={player.name}
@@ -362,6 +492,12 @@ function SetupScreen({ setup, setSetup, onStart }: {
             <h2>{selectedBoard.title}</h2>
             <p>{selectedBoard.description}</p>
 
+            {selectedBoard.mechanics && (
+              <ul className="mechanics-brief" aria-label={`${selectedBoard.title} 的特殊机制`}>
+                {selectedBoard.mechanics.map((item) => <li key={item}>{item}</li>)}
+              </ul>
+            )}
+
             <div className="summary-stats">
               <div><span>玩家</span><strong>{setup.players.length} 人</strong></div>
               <div><span>人类</span><strong>{humanCount} 位</strong></div>
@@ -376,6 +512,11 @@ function SetupScreen({ setup, setSetup, onStart }: {
                   <em>{KIND_SHORT[player.kind]}</em>
                 </div>
               ))}
+              <p className="roster-seat-note">
+                {setup.randomSeats
+                  ? '开始时会按本局种子随机就座，先手随之改变。'
+                  : `按当前顺序就座，${setup.players[0]?.name.trim() || '座位 1'} 先手。`}
+              </p>
             </div>
 
             <div className="start-seed">
@@ -436,10 +577,11 @@ function SetupScreen({ setup, setSetup, onStart }: {
   );
 }
 
-function GameScreen({ game, setGame, setup, log, setLog, onExit, onRestart }: {
+function GameScreen({ game, setGame, roster, seatsShuffled, log, setLog, onExit, onRestart }: {
   game: GameState;
   setGame: (g: GameState) => void;
-  setup: Setup;
+  roster: PlayerSetup[];
+  seatsShuffled: boolean;
   log: string[];
   setLog: (l: string[]) => void;
   onExit: () => void;
@@ -450,9 +592,9 @@ function GameScreen({ game, setGame, setup, log, setLog, onExit, onRestart }: {
   const [showExitConfirm, setShowExitConfirm] = useState(false);
 
   useEffect(() => {
-    bots.current = setup.players.map((p) => (p.kind === 'human' ? null : BOT_REGISTRY[p.kind]!()));
-    rands.current = setup.players.map((_, i) => makeRand(game.config.seed * 31 + i));
-  }, [game.config.seed, setup.players]);
+    bots.current = roster.map((p) => (p.kind === 'human' ? null : BOT_REGISTRY[p.kind]!()));
+    rands.current = roster.map((_, i) => makeRand(game.config.seed * 31 + i));
+  }, [game.config.seed, roster]);
 
   useEffect(() => {
     if (!showExitConfirm) return;
@@ -465,11 +607,11 @@ function GameScreen({ game, setGame, setup, log, setLog, onExit, onRestart }: {
 
   const actor = currentActor(game);
   const legal = useMemo(() => legalActions(game), [game]);
-  const isHumanTurn = actor >= 0 && setup.players[actor]!.kind === 'human';
+  const isHumanTurn = actor >= 0 && roster[actor]!.kind === 'human';
   const legalMarks = legal.filter((action) => !action.type.startsWith('skip')).length;
 
   const describe = (playerIdx: number, action: Action, before: GameState): string => {
-    const name = setup.players[playerIdx]!.name;
+    const name = roster[playerIdx]!.name;
     switch (action.type) {
       case 'skipWhite':
         return playerIdx === before.activePlayer ? `${name} 跳过白骰选择` : `${name} 选择跳过`;
@@ -507,16 +649,70 @@ function GameScreen({ game, setGame, setup, log, setLog, onExit, onRestart }: {
     }
   };
 
+  /**
+   * 变体的连锁效果由引擎默默执行（自动划另一端、消费奖励轨、激活符号）。
+   * 记录里把它们逐条写出来，玩家才能把“我点了这一格”和“棋盘上多出来的叉”对上号。
+   */
+  const chainReactions = (before: GameState, next: GameState, playerIdx: number, action: Action): string[] => {
+    const board = before.config.board;
+    const variant = board.variant;
+    const entries: string[] = [];
+    const own = markedCellRef(before, playerIdx, action);
+    const beforePlayer = before.players[playerIdx]!;
+    const nextPlayer = next.players[playerIdx]!;
+
+    board.rows.forEach((rowDef, row) => {
+      rowDef.cells.forEach((cell, index) => {
+        if (!nextPlayer.marks[row]![index] || beforePlayer.marks[row]![index]) return;
+        if (own && own.row === row && own.cell === index) return;
+        entries.push(`🔗 连锁自动划记 ${colorName(cell.color)}色 ${cell.number}`);
+      });
+    });
+
+    if (variant?.kind === 'double-b' && own
+      && nextPlayer.secondMarks[own.row]![own.cell] && !beforePlayer.secondMarks[own.row]![own.cell]) {
+      entries.push('✖️ ×2 格：这一次计作两个叉');
+    }
+
+    if (variant?.kind === 'bonus-a') {
+      const wasUsed = beforePlayer.variantState.bonusTrackUsed ?? [];
+      const nowUsed = nextPlayer.variantState.bonusTrackUsed ?? [];
+      let voided = 0;
+      nowUsed.forEach((used, index) => {
+        if (!used || wasUsed[index]) return;
+        const color = variant.rewardTrack[index]!;
+        if (next.lockedRows[COLOR_ROW[color]] && !before.lockedRows[COLOR_ROW[color]]) voided += 1;
+        else entries.push(`🎁 奖励轨第 ${index + 1} 格：${colorName(color)}行强制追加 1 格`);
+      });
+      if (voided > 0) entries.push(`🚫 锁行使奖励轨上 ${voided} 个格子作废`);
+    }
+
+    if (variant?.kind === 'bonus-b') {
+      const was = beforePlayer.variantState.bonusSymbols ?? {};
+      const now = nextPlayer.variantState.bonusSymbols ?? {};
+      for (const symbol of SYMBOL_ORDER) {
+        if (now[symbol] && !was[symbol]) {
+          const marker = BONUS_SYMBOL_MARKERS[symbol];
+          entries.push(`✨ 集齐 ${marker.text}：${marker.legend}`);
+        }
+      }
+    }
+
+    return entries;
+  };
+
   const step = (action: Action) => {
     const before = game;
     const next = applyAction(before, action);
-    const entries = [describe(actor, action, before)];
+    const entries = [describe(actor, action, before), ...chainReactions(before, next, actor, action)];
     next.lockedRows.forEach((locked, row) => {
-      if (locked && !before.lockedRows[row]) entries.push(`🔒 第 ${row + 1} 行被锁定`);
+      if (locked && !before.lockedRows[row]) {
+        entries.push(`🔒 ${colorName(before.config.board.rows[row]!.lockColor)}行被锁定，对应彩骰移出`);
+      }
     });
     next.players.forEach((player, i) => {
       if (player.penalties > before.players[i]!.penalties) {
-        entries.push(`⚠️ ${setup.players[i]!.name} 记 1 次失误（-5 分）`);
+        entries.push(`⚠️ ${roster[i]!.name} 记 1 次失误（-${before.config.penaltyPoints} 分）`);
       }
     });
     if (next.phase === 'gameOver') entries.push('🏁 游戏结束，最终得分已结算');
@@ -577,15 +773,15 @@ function GameScreen({ game, setGame, setup, log, setLog, onExit, onRestart }: {
       </header>
 
       {game.phase === 'gameOver' ? (
-        <GameOverPanel game={game} setup={setup} onRestart={onRestart} onExit={onExit} />
+        <GameOverPanel game={game} roster={roster} onRestart={onRestart} onExit={onExit} />
       ) : (
         <>
           <section className="turn-overview" aria-label="当前回合">
             <div className="turn-owner">
               <span className={`player-avatar avatar-${game.activePlayer % 5}`} aria-hidden="true">
-                {setup.players[game.activePlayer]!.name.charAt(0)}
+                {roster[game.activePlayer]!.name.charAt(0)}
               </span>
-              <div><span>主动玩家</span><strong>{setup.players[game.activePlayer]!.name}</strong></div>
+              <div><span>主动玩家</span><strong>{roster[game.activePlayer]!.name}</strong></div>
             </div>
             <div className="phase-steps" aria-label="回合进度">
               <div className={`phase-step ${game.phase === 'whiteChoice' || (game.phase === 'bonusChoice' && game.pendingBonus?.resume === 'whiteChoice') ? 'current' : 'done'}`}>
@@ -606,7 +802,7 @@ function GameScreen({ game, setGame, setup, log, setLog, onExit, onRestart }: {
             <span className="action-icon"><Icon name={isHumanTurn ? 'target' : 'bot'} /></span>
             <div className="action-copy">
               <span>{isHumanTurn ? '轮到你行动' : '等待玩家行动'}</span>
-              <strong>{actionTitle(game, setup, actor, legalMarks, isHumanTurn)}</strong>
+              <strong>{actionTitle(game, roster, actor, legalMarks, isHumanTurn)}</strong>
               <small>{actionDescription(game, legalMarks, isHumanTurn)}</small>
             </div>
             {isHumanTurn && legalMarks > 0 && <span className="choice-count">{legalMarks} 个可选格</span>}
@@ -623,8 +819,8 @@ function GameScreen({ game, setGame, setup, log, setLog, onExit, onRestart }: {
             <div className={`${i === actor && game.phase !== 'gameOver' ? 'is-actor' : ''}`} key={i}>
               <span>{rank + 1}</span>
               <span className={`roster-dot dot-${i % 5}`} />
-              <strong>{setup.players[i]!.name}</strong>
-              <em>{game.players[i]!.penalties > 0 ? `${game.players[i]!.penalties} 次失误` : KIND_SHORT[setup.players[i]!.kind]}</em>
+              <strong>{roster[i]!.name}</strong>
+              <em>{game.players[i]!.penalties > 0 ? `${game.players[i]!.penalties} 次失误` : KIND_SHORT[roster[i]!.kind]}</em>
               <b>{score}</b>
             </div>
           ))}
@@ -636,8 +832,8 @@ function GameScreen({ game, setGame, setup, log, setLog, onExit, onRestart }: {
             key={i}
             game={game}
             playerIdx={i}
-            name={setup.players[i]!.name}
-            kind={setup.players[i]!.kind}
+            name={roster[i]!.name}
+            kind={roster[i]!.kind}
             isActor={i === actor && game.phase !== 'gameOver'}
             isActive={i === game.activePlayer && game.phase !== 'gameOver'}
             markable={i === actor ? markable : new Map()}
@@ -760,13 +956,13 @@ function ScoreReference({ game }: { game: GameState }) {
   );
 }
 
-function GameOverPanel({ game, setup, onRestart, onExit }: {
+function GameOverPanel({ game, roster, onRestart, onExit }: {
   game: GameState;
-  setup: Setup;
+  roster: PlayerSetup[];
   onRestart: () => void;
   onExit: () => void;
 }) {
-  const winnerNames = game.winners!.map((winner) => setup.players[winner]!.name).join('、');
+  const winnerNames = game.winners!.map((winner) => roster[winner]!.name).join('、');
   return (
     <section className="game-over-panel">
       <span className="trophy"><Icon name="trophy" /></span>
@@ -842,62 +1038,78 @@ function PlayerCard({ game, playerIdx, name, kind, isActor, isActive, markable, 
   const board = game.config.board;
   const score = computeScore(game, playerIdx);
   const lucky = game.config.luckyNumbers?.[playerIdx];
+  /** 变体面板悬停时点亮记分卡上对应的格子（`row:cell`）。 */
+  const [highlight, setHighlight] = useState<string[]>([]);
   const totalMarks = player.marks.reduce((sum, row) => sum + row.filter(Boolean).length, 0)
     + player.secondMarks.reduce((sum, row) => sum + row.filter(Boolean).length, 0)
     + player.bonusMarks.reduce((sum, row) => sum + row.filter(Boolean).length, 0);
 
   const variantStatus = (() => {
-    if (board.variant?.kind === 'x-change') return `↔ ${(player.variantState.xChangeThrough ?? -1) + 1}/${board.variant.swaps.length}`;
-    if (board.variant?.kind === 'bonus-a') return `奖励轨 ${player.variantState.bonusTrackUsed!.filter(Boolean).length}/${board.variant.rewardTrack.length}`;
-    if (board.variant?.kind === 'bonus-b') return `符号 ${Object.values(player.variantState.bonusSymbols ?? {}).filter(Boolean).length}/5`;
-    if (board.variant?.kind === 'connected-steps' || board.variant?.kind === 'connected-chain') return `卡面 ${String.fromCharCode(65 + playerIdx % 5)}`;
-    return undefined;
+    const variant = board.variant;
+    if (variant?.kind === 'x-change') return `↔ 已用 ${(player.variantState.xChangeThrough ?? -1) + 1}/${variant.swaps.length}`;
+    if (variant?.kind === 'bonus-a') return `奖励轨 ${player.variantState.bonusTrackUsed!.filter(Boolean).length}/${variant.rewardTrack.length}`;
+    if (variant?.kind === 'bonus-b') return `符号 ${Object.values(player.variantState.bonusSymbols ?? {}).filter(Boolean).length}/5`;
+    const sheet = sheetLabel(board, playerIdx);
+    return sheet ? `卡面 ${sheet}` : undefined;
   })();
 
-  const cellBadge = (row: number, cell: number): SpecialMarker | undefined => {
+  /** 触发 ◆ 拿到的颜色只取决于奖励轨进度，所以所有 ◆ 当前都指向同一个颜色。 */
+  const nextReward = nextRewardColor(game, playerIdx);
+  const doubleReady = doubleCandidates(game, playerIdx);
+
+  const cellHint = (row: number, cell: number): CellHint => {
     const variant = board.variant;
     if (variant?.kind === 'double-b' && variant.multiplierCells.includes(cell)) {
-      return { text: '×2', kind: 'multiplier', description: '双倍格：一次划记计作两个叉', legend: '一次计 2 叉' };
+      return { marker: { text: '×2', kind: 'multiplier', description: '双倍格：划一次直接计作两个叉', legend: '一次计 2 叉' } };
     }
     if (variant?.kind === 'bonus-a' && variant.triggerCells.some((ref) => ref.row === row && ref.cell === cell)) {
-      return { text: '◆', kind: 'trigger', description: '奖励格：划下后触发颜色轨追加', legend: '触发颜色轨' };
+      return {
+        marker: {
+          text: '◆',
+          kind: 'trigger',
+          legend: '触发奖励轨',
+          description: nextReward
+            ? `奖励格：划下后强制在${colorName(nextReward)}行追加 1 格（奖励轨的下一格）`
+            : '奖励格：奖励轨已用尽，不再有追加效果',
+        },
+        markerColor: nextReward ? COLOR_CSS[nextReward] : undefined,
+      };
     }
     if (variant?.kind === 'bonus-b') {
-      for (const [symbol, refs] of Object.entries(variant.symbols) as [BonusSymbol, { row: number; cell: number }[]][]) {
-        if (refs.some((ref) => ref.row === row && ref.cell === cell)) return BONUS_SYMBOL_MARKERS[symbol];
+      const pair = symbolPairAt(board, { row, cell });
+      if (pair) {
+        const peer = pair.ends.find((end) => end.row !== row || end.cell !== cell)!;
+        const marker = BONUS_SYMBOL_MARKERS[pair.symbol];
+        const activated = player.variantState.bonusSymbols?.[pair.symbol] ?? false;
+        return {
+          marker,
+          peers: pair.ends,
+          paired: activated,
+          description: `${marker.description}；配对格是 ${cellLabel(game, peer)}${activated ? '（已集齐）' : '（尚未集齐）'}`,
+        };
       }
     }
     if (variant?.kind === 'connected-steps') {
-      const sheet = variant.sheets[playerIdx % variant.sheets.length]!;
-      if (sheet.some((ref) => ref.row === row && ref.cell === cell)) {
-        return { text: '阶', kind: 'steps', description: '阶梯格：同时计入颜色行和阶梯组', legend: '另计阶梯组' };
+      if (variant.sheets[playerIdx % variant.sheets.length]!.some((ref) => ref.row === row && ref.cell === cell)) {
+        return { marker: { text: '阶', kind: 'steps', description: '阶梯格：既计入所在颜色行，又计入单独的阶梯组', legend: '另计阶梯组' } };
       }
     }
     if (variant?.kind === 'connected-chain') {
-      const sheet = variant.sheets[playerIdx % variant.sheets.length]!;
-      if (sheet.some((pair) => pair.some((ref) => ref.row === row && ref.cell === cell))) {
-        return { text: '链', kind: 'chain', description: '连锁格：划下后自动划记配对端', legend: '自动划配对端' };
+      const peer = chainPartner(board, playerIdx, { row, cell });
+      if (peer) {
+        const index = chainLinks(board, playerIdx)
+          .findIndex((link) => link.ends.some((end) => end.row === row && end.cell === cell));
+        const done = player.marks[peer.row]![peer.cell]!;
+        return {
+          marker: { text: `链${index + 1}`, kind: 'chain', legend: '自动划配对端', description: '' },
+          peers: [{ row, cell }, peer],
+          paired: done,
+          description: `连锁 ${index + 1}：划下这格会自动划记 ${cellLabel(game, peer)}（不受从左到右限制）`,
+        };
       }
     }
-    return undefined;
+    return {};
   };
-
-  const specialLegend: SpecialMarker[] = (() => {
-    switch (board.variant?.kind) {
-      case 'double-b':
-        return [{ text: '×2', kind: 'multiplier', description: '双倍格', legend: '一次计 2 叉' }];
-      case 'bonus-a':
-        return [{ text: '◆', kind: 'trigger', description: '奖励格', legend: '触发颜色轨' }];
-      case 'bonus-b':
-        return Object.values(BONUS_SYMBOL_MARKERS);
-      case 'connected-steps':
-        return [{ text: '阶', kind: 'steps', description: '阶梯格', legend: '另计阶梯组' }];
-      case 'connected-chain':
-        return [{ text: '链', kind: 'chain', description: '连锁格', legend: '自动划配对端' }];
-      default:
-        return [];
-    }
-  })();
 
   const renderBonusRow = (bonus: number) => {
     const bonusDef = board.bonusRows![bonus]!;
@@ -961,16 +1173,7 @@ function PlayerCard({ game, playerIdx, name, kind, isActor, isActive, markable, 
         <div className="card-score"><strong>{score.total}</strong><span>分</span></div>
       </div>
 
-      {specialLegend.length > 0 && (
-        <div className="special-mark-legend" aria-label="特殊格图例">
-          <strong>特殊格</strong>
-          {specialLegend.map((item) => (
-            <span className="legend-item" key={`${item.text}-${item.legend}`} title={item.description}>
-              <i className={`legend-marker marker-${item.kind}`}>{item.text}</i>{item.legend}
-            </span>
-          ))}
-        </div>
-      )}
+      <VariantPanel game={game} playerIdx={playerIdx} score={score} onHighlight={setHighlight} />
 
       <div className="sheet-scroll" tabIndex={long ? 0 : undefined} aria-label={long ? `${name} 的记分卡，可横向滚动` : undefined}>
         <div className="score-sheet">
@@ -987,20 +1190,45 @@ function PlayerCard({ game, playerIdx, name, kind, isActor, isActive, markable, 
                     const viaLucky = action?.type === 'markLucky';
                     const marked = player.marks[row]![cellIndex];
                     const second = player.secondMarks[row]![cellIndex];
-                    const badge = cellBadge(row, cellIndex);
-                    const title = [action ? actionTooltip(action, game) : undefined, badge?.description].filter(Boolean).join(' · ') || undefined;
+                    const hint = cellHint(row, cellIndex);
+                    const badge = hint.marker;
+                    const note = hint.description ?? badge?.description;
+                    const canDouble = doubleReady.some((ref) => ref.row === row && ref.cell === cellIndex);
+                    const linked = highlight.includes(key);
+                    const title = [
+                      action ? actionTooltip(action, game) : undefined,
+                      note,
+                      canDouble && !action ? '本行最近的划记：掷出同一数字即可划第二次' : undefined,
+                    ].filter(Boolean).join(' · ') || undefined;
                     return (
                       <button
                         key={cellIndex}
-                        className={`cell ${marked ? 'marked' : ''} ${second ? 'second-marked' : ''} ${badge ? 'special-cell' : ''} ${action ? 'clickable' : ''} ${viaLucky ? 'lucky' : ''}`}
+                        className={[
+                          'cell',
+                          marked ? 'marked' : '',
+                          second ? 'second-marked' : '',
+                          badge ? 'special-cell' : '',
+                          hint.paired ? 'pair-done' : '',
+                          canDouble ? 'can-double' : '',
+                          linked ? 'linked' : '',
+                          action ? 'clickable' : '',
+                          viaLucky ? 'lucky' : '',
+                        ].filter(Boolean).join(' ')}
                         style={{ background: COLOR_CSS[cell.color] }}
                         disabled={!action}
                         title={title}
-                        aria-label={`${colorName(cell.color)}色 ${cell.number}${badge ? `，${badge.description}` : ''}${marked ? '，已划记' : action ? '，可以选择' : ''}`}
+                        aria-label={`${colorName(cell.color)}色 ${cell.number}${note ? `，${note}` : ''}${marked ? '，已划记' : action ? '，可以选择' : ''}`}
                         onClick={() => action && onMark(action)}
                       >
                         <span className="cell-value">{second ? '××' : marked ? '×' : cell.number}</span>
-                        {badge && <small className={`cell-marker marker-${badge.kind}`}>{badge.text}</small>}
+                        {badge && (
+                          <small
+                            className={`cell-marker marker-${badge.kind}`}
+                            style={hint.markerColor ? { background: hint.markerColor, borderColor: hint.markerColor, color: '#fff' } : undefined}
+                          >
+                            {badge.text}
+                          </small>
+                        )}
                       </button>
                     );
                   })}
@@ -1038,8 +1266,350 @@ function PlayerCard({ game, playerIdx, name, kind, isActor, isActive, markable, 
   );
 }
 
-function actionTitle(game: GameState, setup: Setup, actor: number, legalMarks: number, isHumanTurn: boolean): string {
-  const name = setup.players[actor]!.name;
+function refKey(ref: CellRef): string {
+  return `${ref.row}:${ref.cell}`;
+}
+
+type HoverProps = ReturnType<typeof makeHoverProps>;
+
+/** 变体面板的统一外框：标题 + 一句话规则 + 内容 + 补充说明。 */
+function VariantFrame({ title, rule, note, locate, children }: {
+  title: string;
+  rule: string;
+  note?: ReactNode;
+  locate?: { label: string; refs: CellRef[]; hover: (refs: CellRef[]) => HoverProps };
+  children: ReactNode;
+}) {
+  return (
+    <section className="variant-panel" aria-label={title}>
+      <div className="variant-panel-head">
+        <strong>{title}</strong>
+        <small>{rule}</small>
+        {locate && locate.refs.length > 0 && (
+          <button type="button" className="locate-chip" {...locate.hover(locate.refs)}>
+            <Icon name="target" /> {locate.label}
+          </button>
+        )}
+      </div>
+      {children}
+      {note && <p className="variant-note">{note}</p>}
+    </section>
+  );
+}
+
+/**
+ * 悬停点亮记分卡上的对应格子；点击则钉住，离开鼠标也不消失。
+ * 触摸屏没有 hover，钉住是那里唯一能用的方式。
+ */
+function makeHoverProps(
+  refs: CellRef[],
+  pinned: string[],
+  setPinned: (keys: string[]) => void,
+  onHighlight: (keys: string[]) => void,
+) {
+  const keys = refs.map(refKey);
+  const isPinned = keys.length === pinned.length && keys.every((key, i) => key === pinned[i]);
+  return {
+    'aria-pressed': isPinned,
+    onMouseEnter: () => onHighlight(keys),
+    onMouseLeave: () => onHighlight(pinned),
+    onFocus: () => onHighlight(keys),
+    onBlur: () => onHighlight(pinned),
+    onClick: () => {
+      const next = isPinned ? [] : keys;
+      setPinned(next);
+      onHighlight(next);
+    },
+  };
+}
+
+/**
+ * 变体状态面板：把引擎里那些"看不见的连锁"摊开成看得见的进度。
+ * 角标解释了单个格子的效果，这里解释的是效果之间的顺序关系——
+ * 奖励轨轮到第几格、下一次触发拿什么颜色、哪几组交换还没作废。
+ * 悬停或聚焦任意一项，会点亮记分卡上对应的格子。
+ */
+function VariantPanel({ game, playerIdx, score, onHighlight }: {
+  game: GameState;
+  playerIdx: number;
+  score: ScoreBreakdown;
+  onHighlight: (keys: string[]) => void;
+}) {
+  const board = game.config.board;
+  const variant = board.variant;
+  const player = game.players[playerIdx]!;
+  const [pinned, setPinned] = useState<string[]>([]);
+  const hoverProps = (refs: CellRef[]) => makeHoverProps(refs, pinned, setPinned, onHighlight);
+
+  if (variant?.kind === 'bonus-a') {
+    const track = rewardTrack(game, playerIdx);
+    const next = track.find((slot) => slot.isNext);
+    return (
+      <VariantFrame
+        title="奖励轨"
+        rule="划下 ◆ 就取走轨上最左边还没用掉的一格，在那个颜色的行强制追加 1 格"
+        locate={{ label: '◆ 触发格', refs: variant.triggerCells, hover: hoverProps }}
+        note={
+          <>
+            {next
+              ? <>下一次触发 → <b style={{ color: COLOR_CSS[next.color] }}>{colorName(next.color)}行 +1 格</b>（与你划的是哪个 ◆ 无关）</>
+              : <>奖励轨已用尽，◆ 不再有追加效果</>}
+            ；某色行被锁定时，轨上该颜色的格子全部作废。
+          </>
+        }
+      >
+        <ol className="reward-track">
+          {track.map((slot) => (
+            <li
+              key={slot.index}
+              className={`reward-slot ${slot.used ? (slot.voided ? 'voided' : 'used') : ''} ${slot.isNext ? 'is-next' : ''}`}
+              style={{ background: COLOR_CSS[slot.color] }}
+              title={`第 ${slot.index + 1} 格 · ${colorName(slot.color)}行${slot.voided ? '（锁行作废）' : slot.used ? '（已用）' : slot.isNext ? '（下一个）' : ''}`}
+            >
+              <span>{slot.voided ? '✕' : slot.used ? '✓' : colorName(slot.color)}</span>
+            </li>
+          ))}
+        </ol>
+      </VariantFrame>
+    );
+  }
+
+  if (variant?.kind === 'bonus-b') {
+    return (
+      <VariantFrame
+        title="成对符号"
+        rule="同一个符号的两个格子都划到才会激活效果，把鼠标放到下面任一项可定位这两格"
+        note="○ 与 ◇ 的追加划记是强制的，会立刻打断当前选择。"
+      >
+        <ul className="variant-chips">
+          {symbolPairs(board).map(({ symbol, ends }) => {
+            const marker = BONUS_SYMBOL_MARKERS[symbol];
+            const activated = player.variantState.bonusSymbols?.[symbol] ?? false;
+            const have = ends.filter((end) => player.marks[end.row]![end.cell]).length;
+            return (
+              <li key={symbol}>
+                <button
+                  type="button"
+                  className={`variant-chip ${activated ? 'is-done' : ''}`}
+                  {...hoverProps(ends)}
+                >
+                  <i className="legend-marker marker-symbol">{marker.text}</i>
+                  <span>{marker.legend}</span>
+                  <em>{ends.map((end) => cellLabel(game, end)).join(' + ')}</em>
+                  <b>{activated ? '已激活' : `${have}/2`}</b>
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      </VariantFrame>
+    );
+  }
+
+  if (variant?.kind === 'connected-chain') {
+    const links = chainLinks(board, playerIdx);
+    return (
+      <VariantFrame
+        title={`连锁对 · 卡面 ${sheetLabel(board, playerIdx)}`}
+        rule="带相同编号的两格互为一对：划下任意一端，另一端立刻自动划下"
+        note="自动划下的一端不受“从左到右”限制，但同样可能触发锁行。"
+      >
+        <ul className="variant-chips">
+          {links.map(({ index, ends }) => {
+            const done = ends.every((end) => player.marks[end.row]![end.cell]);
+            return (
+              <li key={index}>
+                <button type="button" className={`variant-chip ${done ? 'is-done' : ''}`} {...hoverProps(ends)}>
+                  <i className="legend-marker marker-chain">链{index + 1}</i>
+                  <span>{cellLabel(game, ends[0])} ⇄ {cellLabel(game, ends[1])}</span>
+                  <b>{done ? '已连' : '未连'}</b>
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      </VariantFrame>
+    );
+  }
+
+  if (variant?.kind === 'connected-steps') {
+    const cells = variant.sheets[playerIdx % variant.sheets.length]!;
+    const stepIndex = score.groupLabels.indexOf('steps');
+    const count = stepIndex >= 0 ? score.groupCounts[stepIndex]! : 0;
+    return (
+      <VariantFrame
+        title={`阶梯组 · 卡面 ${sheetLabel(board, playerIdx)}`}
+        rule="带“阶”角标的 11 个格子既计入所在颜色行，又单独组成第五个计分组"
+        locate={{ label: '阶梯格', refs: cells, hover: hoverProps }}
+        note={<>阶梯组沿用同一张积分表：当前 <b>{count}/11 格 · {stepIndex >= 0 ? score.groupPoints[stepIndex] : 0} 分</b>，划满 66 分。</>}
+      >
+        <ul className="variant-chips steps-chips">
+          {cells.map((ref, index) => (
+            <li key={index}>
+              <button
+                type="button"
+                className={`variant-chip compact ${player.marks[ref.row]![ref.cell] ? 'is-done' : ''}`}
+                {...hoverProps([ref])}
+              >
+                <span>{cellLabel(game, ref)}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      </VariantFrame>
+    );
+  }
+
+  if (variant?.kind === 'x-change') {
+    const slots = swapSlots(game, playerIdx, whiteSum(game));
+    const next = slots.find((slot) => slot.isNext);
+    const live = slots.filter((slot) => slot.usableNow);
+    return (
+      <VariantFrame
+        title="交换轨"
+        rule="掷出交换组里的一个数字，就能当成另一个数字来划；只能从左到右按顺序取用"
+        note={
+          live.length > 0
+            ? <>本次白骰和 <b>{whiteSum(game)}</b> 命中 {live.map((slot) => `${slot.pair[0]}↔${slot.pair[1]}`).join('、')}，可改划 <b>{[...new Set(live.map((slot) => slot.exchangedTo))].join(' / ')}</b>。用掉之后，它和它左边的交换会一起作废。</>
+            : <>取用第 {(next?.index ?? slots.length) + 1} 组后，它和它左边的交换会一起作废。</>
+        }
+      >
+        <ol className="swap-track">
+          {slots.map((slot) => (
+            <li
+              key={slot.index}
+              className={`swap-slot ${slot.spent ? 'used' : ''} ${slot.isNext ? 'is-next' : ''} ${slot.usableNow ? 'usable' : ''}`}
+              title={slot.spent ? '已越过或已使用' : slot.usableNow ? '本次白骰和正好命中，现在可用' : `掷出 ${slot.pair[0]} 或 ${slot.pair[1]} 时可互换`}
+            >
+              {slot.pair[0]}<i>↔</i>{slot.pair[1]}
+            </li>
+          ))}
+        </ol>
+      </VariantFrame>
+    );
+  }
+
+  if (variant?.kind === 'double-a') {
+    const ready = doubleCandidates(game, playerIdx);
+    return (
+      <VariantFrame
+        title="可再划的格子"
+        rule="每行最右侧那个已划的数字可以被划第二次（显示为 ××）"
+        note="第二个叉照常计分，但不推进位置，也不会解锁更靠右的格子。"
+      >
+        {ready.length === 0 ? (
+          <p className="variant-empty">还没有可再划的格子——先在任意一行划下第一个数字。</p>
+        ) : (
+          <ul className="variant-chips">
+            {ready.map((ref) => (
+              <li key={refKey(ref)}>
+                <button type="button" className="variant-chip" {...hoverProps([ref])}>
+                  <span>{cellLabel(game, ref)}</span>
+                  <em>掷出 {board.rows[ref.row]!.cells[ref.cell]!.number} 即可再划</em>
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </VariantFrame>
+    );
+  }
+
+  if (variant?.kind === 'double-b') {
+    const cells = board.rows.flatMap((_, row) => variant.multiplierCells.map((cell) => ({ row, cell })));
+    const hit = cells.filter((ref) => player.marks[ref.row]![ref.cell]).length;
+    return (
+      <VariantFrame
+        title="双倍格"
+        rule="带 ×2 角标的格子划一次直接计作两个叉，不需要额外操作"
+        locate={{ label: '×2 格', refs: cells, hover: hoverProps }}
+        note={<>已命中 <b>{hit}/{cells.length}</b> 个双倍格；每行最多计 16 个划记（136 分）。</>}
+      >
+        <ul className="variant-chips">
+          {board.rows.map((rowDef, row) => {
+            const rowHit = variant.multiplierCells.filter((cell) => player.marks[row]![cell]).length;
+            return (
+              <li key={row}>
+                <button
+                  type="button"
+                  className={`variant-chip compact ${rowHit === variant.multiplierCells.length ? 'is-done' : ''}`}
+                  {...hoverProps(variant.multiplierCells.map((cell) => ({ row, cell })))}
+                >
+                  <i className="legend-marker marker-multiplier" style={{ background: COLOR_CSS[rowDef.lockColor], borderColor: COLOR_CSS[rowDef.lockColor] }}>×2</i>
+                  <span>{variant.multiplierCells.map((cell) => rowDef.cells[cell]!.number).join(' · ')}</span>
+                  <b>{rowHit}/{variant.multiplierCells.length}</b>
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      </VariantFrame>
+    );
+  }
+
+  if (board.bonusRows?.length) {
+    return (
+      <VariantFrame
+        title="双色奖励行"
+        rule="圆格的上下半圆就是它相邻的两行颜色：先划过其中一格，之后再掷出同一个数字才能划它"
+        note="一个奖励格同时计入上下两行的划记数，每行最多计 15 个；只划奖励格不算失误。"
+      >
+        <ul className="variant-chips">
+          {board.bonusRows.map((bonusDef, bonus) => {
+            const marked = player.bonusMarks[bonus]!.filter(Boolean).length;
+            const ready = bonusDef.numbers.filter((_, cell) => !player.bonusMarks[bonus]![cell]
+              && bonusDef.adjacent.some((adj) => player.marks[adj]![cell])).length;
+            const colors = bonusDef.adjacent.map((adj) => colorName(board.rows[adj]!.lockColor)).join(' / ');
+            return (
+              <li key={bonus}>
+                <span className="variant-chip static">
+                  <i
+                    className="legend-marker"
+                    style={{
+                      background: `linear-gradient(180deg, ${COLOR_CSS[board.rows[bonusDef.adjacent[0]]!.lockColor]} 50%, ${COLOR_CSS[board.rows[bonusDef.adjacent[1]]!.lockColor]} 50%)`,
+                      borderRadius: '50%',
+                    }}
+                  />
+                  <span>{colors} 之间</span>
+                  <em>{ready} 格已解锁待触发</em>
+                  <b>{marked}/{bonusDef.numbers.length}</b>
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+      </VariantFrame>
+    );
+  }
+
+  if (board.luckyNumbers) {
+    const lucky = game.config.luckyNumbers?.[playerIdx] ?? [];
+    return (
+      <VariantFrame
+        title="幸运数字"
+        rule="白骰和等于自己的幸运数字时，可以改划“当前划记最少的那一行”的下一格"
+        note="改划的格子会绕过数字限制，但仍然只能往右走一格。"
+      >
+        <ul className="variant-chips">
+          {lucky.map((number) => (
+            <li key={number}>
+              <span className={`variant-chip static ${whiteSum(game) === number ? 'is-live' : ''}`}>
+                <i className="legend-marker marker-trigger">⭐</i>
+                <span>{number}</span>
+                {whiteSum(game) === number && <b>本次命中</b>}
+              </span>
+            </li>
+          ))}
+        </ul>
+      </VariantFrame>
+    );
+  }
+
+  return null;
+}
+
+function actionTitle(game: GameState, roster: PlayerSetup[], actor: number, legalMarks: number, isHumanTurn: boolean): string {
+  const name = roster[actor]!.name;
   if (!isHumanTurn) return `${name} 正在思考…`;
   if (legalMarks === 0) return `${name}，当前没有可划记的格子`;
   if (game.phase === 'bonusChoice') return `${name}，请选择奖励追加格`;
@@ -1114,4 +1684,25 @@ function Icon({ name }: { name: IconName }) {
 
 function colorName(color: string): string {
   return { red: '红', yellow: '黄', green: '绿', blue: '蓝' }[color] ?? color;
+}
+
+/** 动作直接划下的普通格；不划普通格（跳过、二次划记、奖励格）时为 undefined。 */
+function markedCellRef(state: GameState, player: number, action: Action): CellRef | undefined {
+  switch (action.type) {
+    case 'markWhite':
+    case 'markColor':
+    case 'markWhiteExchange':
+    case 'markForced':
+      return { row: action.row, cell: action.cell };
+    case 'markLucky':
+      return { row: action.row, cell: rightmostMark(state, player, action.row) + 1 };
+    default:
+      return undefined;
+  }
+}
+
+/** 把格子说成人话：`红 8`。 */
+function cellLabel(game: GameState, ref: CellRef): string {
+  const cell = game.config.board.rows[ref.row]!.cells[ref.cell]!;
+  return `${colorName(cell.color)} ${cell.number}`;
 }
