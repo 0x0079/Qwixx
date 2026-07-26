@@ -328,6 +328,8 @@ export function App() {
       setGame={setGame}
       roster={roster}
       seatsShuffled={setup.randomSeats}
+      setup={setup}
+      setSetup={setSetup}
       log={log}
       setLog={setLog}
       onExit={() => setGame(null)}
@@ -613,11 +615,13 @@ function SetupScreen({ setup, setSetup, onStart }: {
   );
 }
 
-function GameScreen({ game, setGame, roster, seatsShuffled, log, setLog, onExit, onRestart }: {
+function GameScreen({ game, setGame, roster, seatsShuffled, setup, setSetup, log, setLog, onExit, onRestart }: {
   game: GameState;
   setGame: (g: GameState) => void;
   roster: PlayerSetup[];
   seatsShuffled: boolean;
+  setup: Setup;
+  setSetup: (s: Setup) => void;
   log: string[];
   setLog: (l: string[]) => void;
   onExit: () => void;
@@ -626,6 +630,7 @@ function GameScreen({ game, setGame, roster, seatsShuffled, log, setLog, onExit,
   const bots = useRef<(Bot | null)[]>([]);
   const rands = useRef<(() => number)[]>([]);
   const [showExitConfirm, setShowExitConfirm] = useState(false);
+  const [showSeatSettings, setShowSeatSettings] = useState(false);
   /** 没有可划记格子时是否自动跳过，省得每个人都要手动点一次。 */
   const [autoSkip, setAutoSkip] = useState(false);
 
@@ -635,13 +640,15 @@ function GameScreen({ game, setGame, roster, seatsShuffled, log, setLog, onExit,
   }, [game.config.seed, roster]);
 
   useEffect(() => {
-    if (!showExitConfirm) return;
+    if (!showExitConfirm && !showSeatSettings) return;
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setShowExitConfirm(false);
+      if (event.key !== 'Escape') return;
+      setShowExitConfirm(false);
+      setShowSeatSettings(false);
     };
     window.addEventListener('keydown', closeOnEscape);
     return () => window.removeEventListener('keydown', closeOnEscape);
-  }, [showExitConfirm]);
+  }, [showExitConfirm, showSeatSettings]);
 
   const actor = currentActor(game);
   const legal = useMemo(() => legalActions(game), [game]);
@@ -813,6 +820,14 @@ function GameScreen({ game, setGame, roster, seatsShuffled, log, setLog, onExit,
         <div className="game-meta">
           <span className="seed-meta" title={`本局随机种子：${game.config.seed}`}><Icon name="shuffle" /> 种子 {game.config.seed}</span>
           <span className="lock-meta"><Icon name="lock" /> {lockedCount} / {game.config.locksToEnd} 行锁定</span>
+          <button
+            type="button"
+            className="ghost-button"
+            title="调整座位与先手随机规则（下一局生效）"
+            onClick={() => setShowSeatSettings(true)}
+          >
+            <Icon name="shuffle" /> 座位 · 先手
+          </button>
           <button type="button" className="ghost-button" onClick={() => setShowExitConfirm(true)}>
             <Icon name="exit" /> 退出对局
           </button>
@@ -938,6 +953,58 @@ function GameScreen({ game, setGame, roster, seatsShuffled, log, setLog, onExit,
             <div>
               <button type="button" className="secondary-button" autoFocus onClick={() => setShowExitConfirm(false)}>继续游戏</button>
               <button type="button" className="danger-button" onClick={onExit}>退出对局</button>
+            </div>
+          </section>
+        </div>
+      )}
+
+      {showSeatSettings && (
+        <div className="modal-backdrop" onMouseDown={() => setShowSeatSettings(false)}>
+          <section
+            className="seat-settings-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="seat-settings-title"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <span className="dialog-icon seat-settings-icon"><Icon name="shuffle" /></span>
+            <h2 id="seat-settings-title">座位与先手</h2>
+            <p>当前对局不受影响；调整后从下一局（点击"再来一局"或重新开始）起生效。</p>
+
+            <div className="seat-settings-body">
+              <div className="seat-controls">
+                <div className="seat-controls-copy">
+                  <strong>座位顺序</strong>
+                  <small>Connected 变体按座位分配 A–E 卡面。</small>
+                </div>
+                <label className="seat-toggle">
+                  <input
+                    type="checkbox"
+                    checked={setup.randomSeats}
+                    onChange={(e) => setSetup({ ...setup, randomSeats: e.target.checked })}
+                  />
+                  <span>每局开始时随机</span>
+                </label>
+              </div>
+
+              <div className="seat-controls first-player-controls">
+                <div className="seat-controls-copy">
+                  <strong>先手顺序</strong>
+                  <small>先手只决定谁先掷骰，不会移动座位，也不影响 Connected 卡面分配。</small>
+                </div>
+                <label className="seat-toggle">
+                  <input
+                    type="checkbox"
+                    checked={setup.randomFirstPlayer}
+                    onChange={(e) => setSetup({ ...setup, randomFirstPlayer: e.target.checked })}
+                  />
+                  <span>每局开始时随机先手</span>
+                </label>
+              </div>
+            </div>
+
+            <div className="seat-settings-actions">
+              <button type="button" className="secondary-button" autoFocus onClick={() => setShowSeatSettings(false)}>完成</button>
             </div>
           </section>
         </div>
