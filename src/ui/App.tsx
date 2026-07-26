@@ -868,16 +868,6 @@ function GameScreen({ game, setGame, roster, seatsShuffled, setup, setSetup, log
               <small>{actionDescription(game, legalMarks, isHumanTurn, autoSkip)}</small>
             </div>
             {isHumanTurn && legalMarks > 0 && <span className="choice-count">{legalMarks} 个可选格</span>}
-            {isHumanTurn && legalMarks === 0 && skipAction && (
-              <label className="auto-skip-toggle" title="没有可划记的格子时自动跳过，无需每次手动点击">
-                <input
-                  type="checkbox"
-                  checked={autoSkip}
-                  onChange={(e) => setAutoSkip(e.target.checked)}
-                />
-                <span>自动跳过</span>
-              </label>
-            )}
             {!isHumanTurn && <span className="thinking"><i /><i /><i /></span>}
           </section>
         </>
@@ -912,6 +902,9 @@ function GameScreen({ game, setGame, roster, seatsShuffled, setup, setSetup, log
             onMark={step}
             onSkip={i === actor && isHumanTurn && skipAction ? () => step(skipAction) : undefined}
             skipLabel={game.phase === 'whiteChoice' ? '本次跳过' : '结束回合'}
+            showAutoSkip={i === actor && isHumanTurn && legalMarks === 0 && !!skipAction}
+            autoSkip={autoSkip}
+            onAutoSkipChange={setAutoSkip}
           />
         ))}
       </section>
@@ -1146,7 +1139,7 @@ function Die({ value, color }: { value: number | null; color: string }) {
   );
 }
 
-function PlayerCard({ game, playerIdx, name, kind, isActor, isActive, markable, onMark, onSkip, skipLabel }: {
+function PlayerCard({ game, playerIdx, name, kind, isActor, isActive, markable, onMark, onSkip, skipLabel, showAutoSkip, autoSkip, onAutoSkipChange }: {
   game: GameState;
   playerIdx: number;
   name: string;
@@ -1157,6 +1150,10 @@ function PlayerCard({ game, playerIdx, name, kind, isActor, isActive, markable, 
   onMark: (a: Action) => void;
   onSkip?: () => void;
   skipLabel: string;
+  /** 本回合没有可划记格子，可以在跳过按钮旁边打开自动跳过。 */
+  showAutoSkip?: boolean;
+  autoSkip?: boolean;
+  onAutoSkipChange?: (v: boolean) => void;
 }) {
   const player = game.players[playerIdx]!;
   const board = game.config.board;
@@ -1287,6 +1284,16 @@ function PlayerCard({ game, playerIdx, name, kind, isActor, isActive, markable, 
             <button className="card-skip-button" type="button" aria-label={`${skipLabel}，${name}`} onClick={onSkip}>
               {skipLabel}<Icon name="skip" />
             </button>
+          )}
+          {showAutoSkip && (
+            <label className="card-auto-skip" title="没有可划记的格子时自动跳过，无需每次手动点击">
+              <input
+                type="checkbox"
+                checked={!!autoSkip}
+                onChange={(e) => onAutoSkipChange?.(e.target.checked)}
+              />
+              <span>自动跳过</span>
+            </label>
           )}
         </div>
         <div className="card-score"><strong>{score.total}</strong><span>分</span></div>
