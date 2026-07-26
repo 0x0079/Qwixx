@@ -1,0 +1,8 @@
+# Python 训练管线依赖（推理端零依赖，见 src/ai/mlp.ts）
+# torch 建议装 CPU 版：pip install torch --index-url https://download.pytorch.org/whl/cpu
+torch>=2.0
+numpy>=1.24
+# PPO 自对弈微调（ppo_train.py）：
+stable-baselines3>=2.0
+sb3-contrib>=2.0
+gymnasium>=0.29

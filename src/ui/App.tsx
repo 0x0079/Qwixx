@@ -13,7 +13,7 @@ import { BOARD_PRESETS, randomMixedBoard } from '../core/board';
 import { computeScore, pointsForCount } from '../core/scoring';
 import { BOT_REGISTRY, makeRand, type Bot } from '../ai/bots';
 
-type PlayerKind = 'human' | 'random' | 'greedy' | 'heuristic';
+type PlayerKind = 'human' | 'random' | 'greedy' | 'heuristic' | 'policy' | 'rollout-lite' | 'rollout';
 
 interface PlayerSetup {
   name: string;
@@ -56,6 +56,9 @@ const KIND_LABEL: Record<PlayerKind, string> = {
   random: '随机 AI',
   greedy: '贪心 AI',
   heuristic: '启发式 AI',
+  policy: '神经网络 AI（最强·推荐）',
+  'rollout-lite': '前瞻 AI',
+  rollout: '深度前瞻 AI（较慢）',
 };
 
 const KIND_SHORT: Record<PlayerKind, string> = {
@@ -63,6 +66,9 @@ const KIND_SHORT: Record<PlayerKind, string> = {
   random: '随机',
   greedy: '贪心',
   heuristic: '启发式',
+  policy: '神经网络',
+  'rollout-lite': '前瞻',
+  rollout: '深度前瞻',
 };
 
 const BOARD_OPTIONS: BoardOption[] = [
@@ -173,7 +179,7 @@ export function App() {
   const [setup, setSetup] = useState<Setup>({
     players: [
       { name: '玩家 1', kind: 'human' },
-      { name: '小 Q', kind: 'heuristic' },
+      { name: '小 Q', kind: 'policy' },
     ],
     boardId: 'classic',
     seed: '',
@@ -300,7 +306,7 @@ function SetupScreen({ setup, setSetup, onStart }: {
               disabled={setup.players.length >= 5}
               onClick={() => setSetup({
                 ...setup,
-                players: [...setup.players, { name: `玩家 ${setup.players.length + 1}`, kind: 'heuristic' }],
+                players: [...setup.players, { name: `玩家 ${setup.players.length + 1}`, kind: 'policy' }],
               })}
             >
               <Icon name="plus" />

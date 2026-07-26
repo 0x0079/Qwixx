@@ -2,6 +2,8 @@ import type { Action, GameState } from '../core/types';
 import { legalActions, rightmostMark } from '../core/engine';
 import { effectiveRowCount } from '../core/scoring';
 import { nextRand } from '../core/rng';
+import { RolloutBot } from './rollout';
+import { PolicyBot } from './policy';
 
 /**
  * 机器人接口：给定状态与合法动作，返回一个动作。
@@ -136,8 +138,10 @@ export class HeuristicBot implements Bot {
   /**
    * wSkip：每跳过一格的代价；markBonus：划记本身的建设性价值
    * （推动锁行、压缩终局，实验表明积极划记在 2 人局中显著更强）。
+   * 默认值由 `pnpm tune` 两阶段网格搜索得出（对 heuristic/greedy 混合对手池，
+   * 保留种子集验证；对旧默认值 1.8/1/1 直接对战 5000 局胜率 51.2%）。
    */
-  constructor(private wSkip = 1.8, private markBonus = 1, private baseMaxSkip = 1) {}
+  constructor(private wSkip = 2.0, private markBonus = 2.25, private baseMaxSkip = 1) {}
 
   private progress(state: GameState): number {
     // 0~1 的粗略进度：锁定行数、最大失误数、各玩家划记总量。
@@ -189,4 +193,7 @@ export const BOT_REGISTRY: Record<string, () => Bot> = {
   random: () => new RandomBot(),
   greedy: () => new GreedyBot(),
   heuristic: () => new HeuristicBot(),
+  rollout: () => new RolloutBot(),
+  'rollout-lite': () => new RolloutBot(16, new HeuristicBot(), 'rollout-lite'),
+  policy: () => new PolicyBot(),
 };
