@@ -124,3 +124,16 @@ Fisher–Yates 洗牌，而不是 `Math.random`——否则“同种子重现同
 `chainPartner`、`swapSlots`、`doubleCandidates` …），引擎与 UI 共用同一份定义：
 `engine.ts` 用 `nextRewardIndex` / `chainPartner` 执行效果，`VariantPanel` 用同样的
 函数把状态渲染成进度条，两边不会各写一套而逐渐失配。
+
+呈现上遵循两条规则，让人和机器读到的是同一件事：
+
+- **静态属性画在格子上，动态状态只写一处。** 格子角标只表示"这一格是什么"
+  （◆ 触发格、链N、阶、×2），样式恒定；"下一次触发拿什么颜色"这类会随进度变化的
+  信息只出现在变体面板顶部的一行读数里。早期版本把奖励色染到全部 12 个 ◆ 上，
+  信息虽在，却让同一张截图在不同回合含义不同，人要反复确认、机器要靠像素猜。
+- **不用颜色单独承载语义。** 每个状态都有文字或字形（✓ 已用 / ✕ 锁行作废 /
+  下一个 / 现在可用），颜色只是强化。
+
+面板与记分卡同时输出结构化属性，`data-variant` / `data-state` / `data-color` /
+`data-index`，格子上还有 `data-row`、`data-cell`、`data-number`、`data-marks`、
+`data-selectable`。截图理解、E2E 断言、外部工具都可以直接读 DOM，不必解析画面。

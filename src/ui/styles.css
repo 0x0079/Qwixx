@@ -676,6 +676,27 @@ summary:focus-visible,
 .variant-note b { color: var(--ink); }
 .variant-empty { margin: 7px 0 0; color: #929991; font-size: 9px; }
 
+/* The one place the volatile "what comes next" state is stated, in words. */
+.track-readout {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0 0;
+  color: #6d766f;
+  font-size: 9px;
+}
+.track-readout > span { font-weight: 750; }
+.track-readout b {
+  padding: 2px 8px;
+  border-radius: 999px;
+  color: white;
+  font-size: 10px;
+  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.2);
+}
+.track-readout b.is-empty { background: #b6bbb5; }
+.track-readout em { color: #929991; font-style: normal; }
+
 .reward-track, .swap-track { display: flex; flex-wrap: wrap; gap: 4px; margin: 8px 0 0; padding: 0; list-style: none; }
 .reward-slot {
   position: relative;
@@ -691,8 +712,9 @@ summary:focus-visible,
   box-shadow: inset 0 -2px 0 rgba(0, 0, 0, 0.1);
 }
 .reward-slot.used, .reward-slot.voided { opacity: 0.3; filter: grayscale(0.5); box-shadow: none; }
-.reward-slot.is-next { box-shadow: 0 0 0 2px #fff, 0 0 0 4px var(--green), inset 0 -2px 0 rgba(0, 0, 0, 0.1); }
-.reward-slot.is-next::after {
+.reward-slot.voided { outline: 1px dashed rgba(40, 50, 43, 0.55); outline-offset: -3px; }
+.reward-slot.next { box-shadow: 0 0 0 2px #fff, 0 0 0 4px var(--green), inset 0 -2px 0 rgba(0, 0, 0, 0.1); }
+.reward-slot.next::after {
   content: '下一个';
   position: absolute;
   bottom: -14px;
@@ -719,9 +741,12 @@ summary:focus-visible,
   font-weight: 800;
 }
 .swap-slot i { color: #a7ada7; font-style: normal; }
-.swap-slot.used { opacity: 0.35; text-decoration: line-through; }
-.swap-slot.is-next { border-color: #c2c8bf; box-shadow: inset 0 0 0 1px rgba(35, 123, 75, 0.14); }
+.swap-slot s { margin-right: 1px; color: #9aa09a; text-decoration: none; }
+.swap-slot.spent { opacity: 0.4; text-decoration: line-through; }
+.swap-slot.next { border-color: #b6bdb4; box-shadow: inset 0 0 0 1px rgba(35, 123, 75, 0.14); }
 .swap-slot.usable { border-color: var(--green); background: var(--green-soft); color: var(--green-dark); box-shadow: 0 0 0 2px rgba(35, 123, 75, 0.14); }
+.swap-slot b { margin-left: 3px; padding: 1px 4px; border-radius: 999px; background: #eceae4; color: #6d766f; font-size: 7px; font-weight: 800; }
+.swap-slot.usable b { background: var(--green); color: white; }
 
 .variant-chips { display: flex; flex-wrap: wrap; gap: 5px; margin: 8px 0 0; padding: 0; list-style: none; }
 .variant-chip {

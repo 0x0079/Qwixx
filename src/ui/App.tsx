@@ -62,8 +62,6 @@ interface SpecialMarker {
 /** 一个格子上的变体信息：角标、配对关系与说明文字。 */
 interface CellHint {
   marker?: SpecialMarker;
-  /** 角标改用这个颜色（Bonus A 用它显示"这次会拿到哪种颜色"）。 */
-  markerColor?: string;
   /** 互为一对的格子（符号对、连锁对）。 */
   peers?: CellRef[];
   /** 这一对已经凑齐。 */
@@ -1064,15 +1062,10 @@ function PlayerCard({ game, playerIdx, name, kind, isActor, isActive, markable, 
     }
     if (variant?.kind === 'bonus-a' && variant.triggerCells.some((ref) => ref.row === row && ref.cell === cell)) {
       return {
-        marker: {
-          text: '◆',
-          kind: 'trigger',
-          legend: '触发奖励轨',
-          description: nextReward
-            ? `奖励格：划下后强制在${colorName(nextReward)}行追加 1 格（奖励轨的下一格）`
-            : '奖励格：奖励轨已用尽，不再有追加效果',
-        },
-        markerColor: nextReward ? COLOR_CSS[nextReward] : undefined,
+        marker: { text: '◆', kind: 'trigger', legend: '触发奖励轨', description: '' },
+        description: nextReward
+          ? `奖励格：划下后消费奖励轨的下一格，当前是${colorName(nextReward)} —— 强制在${colorName(nextReward)}行追加 1 格`
+          : '奖励格：奖励轨已用尽，划下不再有追加效果',
       };
     }
     if (variant?.kind === 'bonus-b') {
@@ -1218,17 +1211,17 @@ function PlayerCard({ game, playerIdx, name, kind, isActor, isActive, markable, 
                         disabled={!action}
                         title={title}
                         aria-label={`${colorName(cell.color)}色 ${cell.number}${note ? `，${note}` : ''}${marked ? '，已划记' : action ? '，可以选择' : ''}`}
+                        data-row={row}
+                        data-cell={cellIndex}
+                        data-color={cell.color}
+                        data-number={cell.number}
+                        data-marks={second ? 2 : marked ? 1 : 0}
+                        data-special={badge ? hint.marker!.kind : undefined}
+                        data-selectable={action ? 'true' : 'false'}
                         onClick={() => action && onMark(action)}
                       >
                         <span className="cell-value">{second ? '××' : marked ? '×' : cell.number}</span>
-                        {badge && (
-                          <small
-                            className={`cell-marker marker-${badge.kind}`}
-                            style={hint.markerColor ? { background: hint.markerColor, borderColor: hint.markerColor, color: '#fff' } : undefined}
-                          >
-                            {badge.text}
-                          </small>
-                        )}
+                        {badge && <small className={`cell-marker marker-${badge.kind}`}>{badge.text}</small>}
                       </button>
                     );
                   })}
@@ -1273,7 +1266,8 @@ function refKey(ref: CellRef): string {
 type HoverProps = ReturnType<typeof makeHoverProps>;
 
 /** 变体面板的统一外框：标题 + 一句话规则 + 内容 + 补充说明。 */
-function VariantFrame({ title, rule, note, locate, children }: {
+function VariantFrame({ kind, title, rule, note, locate, children }: {
+  kind: string;
   title: string;
   rule: string;
   note?: ReactNode;
@@ -1281,7 +1275,7 @@ function VariantFrame({ title, rule, note, locate, children }: {
   children: ReactNode;
 }) {
   return (
-    <section className="variant-panel" aria-label={title}>
+    <section className="variant-panel" data-variant={kind} aria-label={title}>
       <div className="variant-panel-head">
         <strong>{title}</strong>
         <small>{rule}</small>
@@ -1346,29 +1340,48 @@ function VariantPanel({ game, playerIdx, score, onHighlight }: {
     const next = track.find((slot) => slot.isNext);
     return (
       <VariantFrame
+        kind="bonus-a"
         title="奖励轨"
         rule="划下 ◆ 就取走轨上最左边还没用掉的一格，在那个颜色的行强制追加 1 格"
         locate={{ label: '◆ 触发格', refs: variant.triggerCells, hover: hoverProps }}
         note={
           <>
-            {next
-              ? <>下一次触发 → <b style={{ color: COLOR_CSS[next.color] }}>{colorName(next.color)}行 +1 格</b>（与你划的是哪个 ◆ 无关）</>
-              : <>奖励轨已用尽，◆ 不再有追加效果</>}
-            ；某色行被锁定时，轨上该颜色的格子全部作废。
+            所有 ◆ 现在都指向同一格，与你划的是哪个无关；
+            某色行被锁定时，轨上该颜色的格子全部作废。
           </>
         }
       >
+        {/* 轨道是"下一次拿什么颜色"的唯一出处：格子上的 ◆ 恒为同一个样式，
+            会变的那部分只在这里出现一次，人和读屏/截图的机器都只需要看这一处。 */}
+        <p className="track-readout" data-next-color={next?.color ?? 'none'}>
+          <span>下一次触发</span>
+          {next ? (
+            <b style={{ background: COLOR_CSS[next.color] }}>{colorName(next.color)}行 +1 格</b>
+          ) : (
+            <b className="is-empty">奖励轨已用尽</b>
+          )}
+          <em>剩余 {track.filter((slot) => !slot.used).length} / {track.length} 格</em>
+        </p>
         <ol className="reward-track">
-          {track.map((slot) => (
-            <li
-              key={slot.index}
-              className={`reward-slot ${slot.used ? (slot.voided ? 'voided' : 'used') : ''} ${slot.isNext ? 'is-next' : ''}`}
-              style={{ background: COLOR_CSS[slot.color] }}
-              title={`第 ${slot.index + 1} 格 · ${colorName(slot.color)}行${slot.voided ? '（锁行作废）' : slot.used ? '（已用）' : slot.isNext ? '（下一个）' : ''}`}
-            >
-              <span>{slot.voided ? '✕' : slot.used ? '✓' : colorName(slot.color)}</span>
-            </li>
-          ))}
+          {track.map((slot) => {
+            const state = slot.voided ? 'voided' : slot.used ? 'used' : slot.isNext ? 'next' : 'open';
+            const stateText = { voided: '锁行作废', used: '已用', next: '下一个', open: '待用' }[state];
+            return (
+              <li
+                key={slot.index}
+                className={`reward-slot ${state}`}
+                style={{ background: COLOR_CSS[slot.color] }}
+                data-index={slot.index}
+                data-color={slot.color}
+                data-row={slot.row}
+                data-state={state}
+                title={`第 ${slot.index + 1} 格 · ${colorName(slot.color)}行 · ${stateText}`}
+                aria-label={`第 ${slot.index + 1} 格，${colorName(slot.color)}行，${stateText}`}
+              >
+                <span>{slot.voided ? '✕' : slot.used ? '✓' : colorName(slot.color)}</span>
+              </li>
+            );
+          })}
         </ol>
       </VariantFrame>
     );
@@ -1377,6 +1390,7 @@ function VariantPanel({ game, playerIdx, score, onHighlight }: {
   if (variant?.kind === 'bonus-b') {
     return (
       <VariantFrame
+        kind="bonus-b"
         title="成对符号"
         rule="同一个符号的两个格子都划到才会激活效果，把鼠标放到下面任一项可定位这两格"
         note="○ 与 ◇ 的追加划记是强制的，会立刻打断当前选择。"
@@ -1391,6 +1405,9 @@ function VariantPanel({ game, playerIdx, score, onHighlight }: {
                 <button
                   type="button"
                   className={`variant-chip ${activated ? 'is-done' : ''}`}
+                  data-symbol={symbol}
+                  data-progress={`${have}/2`}
+                  data-state={activated ? 'active' : 'pending'}
                   {...hoverProps(ends)}
                 >
                   <i className="legend-marker marker-symbol">{marker.text}</i>
@@ -1410,6 +1427,7 @@ function VariantPanel({ game, playerIdx, score, onHighlight }: {
     const links = chainLinks(board, playerIdx);
     return (
       <VariantFrame
+        kind="connected-chain"
         title={`连锁对 · 卡面 ${sheetLabel(board, playerIdx)}`}
         rule="带相同编号的两格互为一对：划下任意一端，另一端立刻自动划下"
         note="自动划下的一端不受“从左到右”限制，但同样可能触发锁行。"
@@ -1419,7 +1437,13 @@ function VariantPanel({ game, playerIdx, score, onHighlight }: {
             const done = ends.every((end) => player.marks[end.row]![end.cell]);
             return (
               <li key={index}>
-                <button type="button" className={`variant-chip ${done ? 'is-done' : ''}`} {...hoverProps(ends)}>
+                <button
+                  type="button"
+                  className={`variant-chip ${done ? 'is-done' : ''}`}
+                  data-link={index + 1}
+                  data-state={done ? 'linked' : 'open'}
+                  {...hoverProps(ends)}
+                >
                   <i className="legend-marker marker-chain">链{index + 1}</i>
                   <span>{cellLabel(game, ends[0])} ⇄ {cellLabel(game, ends[1])}</span>
                   <b>{done ? '已连' : '未连'}</b>
@@ -1438,6 +1462,7 @@ function VariantPanel({ game, playerIdx, score, onHighlight }: {
     const count = stepIndex >= 0 ? score.groupCounts[stepIndex]! : 0;
     return (
       <VariantFrame
+        kind="connected-steps"
         title={`阶梯组 · 卡面 ${sheetLabel(board, playerIdx)}`}
         rule="带“阶”角标的 11 个格子既计入所在颜色行，又单独组成第五个计分组"
         locate={{ label: '阶梯格', refs: cells, hover: hoverProps }}
@@ -1449,6 +1474,7 @@ function VariantPanel({ game, playerIdx, score, onHighlight }: {
               <button
                 type="button"
                 className={`variant-chip compact ${player.marks[ref.row]![ref.cell] ? 'is-done' : ''}`}
+                data-state={player.marks[ref.row]![ref.cell] ? 'marked' : 'open'}
                 {...hoverProps([ref])}
               >
                 <span>{cellLabel(game, ref)}</span>
@@ -1466,6 +1492,7 @@ function VariantPanel({ game, playerIdx, score, onHighlight }: {
     const live = slots.filter((slot) => slot.usableNow);
     return (
       <VariantFrame
+        kind="x-change"
         title="交换轨"
         rule="掷出交换组里的一个数字，就能当成另一个数字来划；只能从左到右按顺序取用"
         note={
@@ -1475,15 +1502,31 @@ function VariantPanel({ game, playerIdx, score, onHighlight }: {
         }
       >
         <ol className="swap-track">
-          {slots.map((slot) => (
-            <li
-              key={slot.index}
-              className={`swap-slot ${slot.spent ? 'used' : ''} ${slot.isNext ? 'is-next' : ''} ${slot.usableNow ? 'usable' : ''}`}
-              title={slot.spent ? '已越过或已使用' : slot.usableNow ? '本次白骰和正好命中，现在可用' : `掷出 ${slot.pair[0]} 或 ${slot.pair[1]} 时可互换`}
-            >
-              {slot.pair[0]}<i>↔</i>{slot.pair[1]}
-            </li>
-          ))}
+          {slots.map((slot) => {
+            const state = slot.spent ? 'spent' : slot.usableNow ? 'usable' : slot.isNext ? 'next' : 'open';
+            const stateText = {
+              spent: '已作废',
+              usable: '现在可用',
+              next: '下一组',
+              open: '待用',
+            }[state];
+            return (
+              <li
+                key={slot.index}
+                className={`swap-slot ${state}`}
+                data-index={slot.index}
+                data-from={slot.pair[0]}
+                data-to={slot.pair[1]}
+                data-state={state}
+                title={`第 ${slot.index + 1} 组 ${slot.pair[0]}↔${slot.pair[1]} · ${stateText}`}
+                aria-label={`第 ${slot.index + 1} 组，${slot.pair[0]} 换 ${slot.pair[1]}，${stateText}`}
+              >
+                {slot.spent && <s aria-hidden="true">✕</s>}
+                {slot.pair[0]}<i>↔</i>{slot.pair[1]}
+                {(state === 'usable' || state === 'next') && <b>{stateText}</b>}
+              </li>
+            );
+          })}
         </ol>
       </VariantFrame>
     );
@@ -1493,6 +1536,7 @@ function VariantPanel({ game, playerIdx, score, onHighlight }: {
     const ready = doubleCandidates(game, playerIdx);
     return (
       <VariantFrame
+        kind="double-a"
         title="可再划的格子"
         rule="每行最右侧那个已划的数字可以被划第二次（显示为 ××）"
         note="第二个叉照常计分，但不推进位置，也不会解锁更靠右的格子。"
@@ -1520,6 +1564,7 @@ function VariantPanel({ game, playerIdx, score, onHighlight }: {
     const hit = cells.filter((ref) => player.marks[ref.row]![ref.cell]).length;
     return (
       <VariantFrame
+        kind="double-b"
         title="双倍格"
         rule="带 ×2 角标的格子划一次直接计作两个叉，不需要额外操作"
         locate={{ label: '×2 格', refs: cells, hover: hoverProps }}
@@ -1550,6 +1595,7 @@ function VariantPanel({ game, playerIdx, score, onHighlight }: {
   if (board.bonusRows?.length) {
     return (
       <VariantFrame
+        kind="big-points"
         title="双色奖励行"
         rule="圆格的上下半圆就是它相邻的两行颜色：先划过其中一格，之后再掷出同一个数字才能划它"
         note="一个奖励格同时计入上下两行的划记数，每行最多计 15 个；只划奖励格不算失误。"
@@ -1586,6 +1632,7 @@ function VariantPanel({ game, playerIdx, score, onHighlight }: {
     const lucky = game.config.luckyNumbers?.[playerIdx] ?? [];
     return (
       <VariantFrame
+        kind="lucky"
         title="幸运数字"
         rule="白骰和等于自己的幸运数字时，可以改划“当前划记最少的那一行”的下一格"
         note="改划的格子会绕过数字限制，但仍然只能往右走一格。"
