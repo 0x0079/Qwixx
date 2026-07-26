@@ -10,6 +10,7 @@ src/
     board.ts     记分卡定义：经典 / gemixxt A / gemixxt B / 随机混排生成器
     engine.ts    回合状态机：newGame / legalActions / applyAction / applyActionInPlace
     scoring.ts   计分（按行或按颜色分组、锁定奖励、失误扣分）
+    variants.ts  变体连锁关系的只读查询（奖励轨 / 连锁对 / 符号对 / 交换轨）
   ai/
     bots.ts      基线机器人：random / greedy / heuristic（统一 Bot 接口）
     encode.ts    RL 编码：固定 90 维离散动作空间 + 定长观测向量 + 合法动作掩码
@@ -110,5 +111,29 @@ Longo / Big Points 的实现依据官方英文规则 PDF（QwixxLongo_GB.pdf / Q
 
 ## 网页 UI
 
-Vite + React 本地热座对局：任意人数（1–5）人类/AI 混合、三种棋盘预设、可设种子。
+Vite + React 本地热座对局：任意人数（1–5）人类/AI 混合、全部棋盘预设、可设种子。
 AI 决策自动播放；人类回合点击格子/按钮行动。`pnpm dev` 启动。
+
+座位顺序即行动顺序（座位 1 先手），Connected 变体还按座位分配 A–E 卡面，所以设置页
+提供「随机座位」与「每局开始时随机」。后者用 `seedToState(seed ^ 常量)` 派生的
+Fisher–Yates 洗牌，而不是 `Math.random`——否则“同种子重现同一局”这个约定会在座位
+这一维上失效。就座结果存在 `App` 的 `roster` 中，对局屏一律读它而不是设置页的名单。
+
+变体的连锁效果（自动划另一端、消费奖励轨、激活符号）都发生在引擎内部，UI 上原本
+只有一个角标。`src/core/variants.ts` 把这些关系抽成只读查询（`rewardTrack`、
+`chainPartner`、`swapSlots`、`doubleCandidates` …），引擎与 UI 共用同一份定义：
+`engine.ts` 用 `nextRewardIndex` / `chainPartner` 执行效果，`VariantPanel` 用同样的
+函数把状态渲染成进度条，两边不会各写一套而逐渐失配。
+
+呈现上遵循两条规则，让人和机器读到的是同一件事：
+
+- **静态属性画在格子上，动态状态只写一处。** 格子角标只表示"这一格是什么"
+  （◆ 触发格、链N、阶、×2），样式恒定；"下一次触发拿什么颜色"这类会随进度变化的
+  信息只出现在变体面板顶部的一行读数里。早期版本把奖励色染到全部 12 个 ◆ 上，
+  信息虽在，却让同一张截图在不同回合含义不同，人要反复确认、机器要靠像素猜。
+- **不用颜色单独承载语义。** 每个状态都有文字或字形（✓ 已用 / ✕ 锁行作废 /
+  下一个 / 现在可用），颜色只是强化。
+
+面板与记分卡同时输出结构化属性，`data-variant` / `data-state` / `data-color` /
+`data-index`，格子上还有 `data-row`、`data-cell`、`data-number`、`data-marks`、
+`data-selectable`。截图理解、E2E 断言、外部工具都可以直接读 DOM，不必解析画面。

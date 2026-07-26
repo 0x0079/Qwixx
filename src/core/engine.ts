@@ -3,6 +3,7 @@ import { COLORS } from './types';
 import { nextRand, rollDie, seedToState } from './rng';
 import { validateBoard } from './board';
 import { computeScore } from './scoring';
+import { chainPartner, nextRewardIndex, sameRef } from './variants';
 
 export const DEFAULT_RULES: Omit<RulesConfig, 'board' | 'numPlayers' | 'seed'> = {
   maxPenalties: 4,
@@ -168,10 +169,6 @@ function colorMarkableCells(state: GameState): { row: number; cell: number }[] {
     }
   }
   return out;
-}
-
-function sameRef(a: CellRef, b: CellRef): boolean {
-  return a.row === b.row && a.cell === b.cell;
 }
 
 function doubleLatestActions(state: GameState, player: number, phase: 'white' | 'color'): Action[] {
@@ -430,18 +427,14 @@ function afterCellMarked(state: GameState, player: number, ref: CellRef): void {
   }
 
   if (variant.kind === 'connected-chain') {
-    const sheet = variant.sheets[player % variant.sheets.length]!;
-    const pair = sheet.find(([a, b]) => sameRef(a, ref) || sameRef(b, ref));
-    if (pair) {
-      const other = sameRef(pair[0], ref) ? pair[1] : pair[0];
-      p.marks[other.row]![other.cell] = true;
-    }
+    const other = chainPartner(state.config.board, player, ref);
+    if (other) p.marks[other.row]![other.cell] = true;
     return;
   }
 
   if (variant.kind === 'bonus-a' && variant.triggerCells.some((trigger) => sameRef(trigger, ref))) {
     const used = p.variantState.bonusTrackUsed!;
-    const index = used.findIndex((value) => !value);
+    const index = nextRewardIndex(used);
     if (index >= 0) {
       used[index] = true;
       ensurePending(state, player);
