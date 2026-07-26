@@ -596,8 +596,6 @@ summary:focus-visible,
 .action-copy strong { font-size: 14px; }
 .action-copy small { color: var(--muted); font-size: 10px; line-height: 1.4; }
 .choice-count { margin-left: auto; padding: 5px 10px; border-radius: 999px; background: white; color: var(--green); font-size: 10px; font-weight: 750; white-space: nowrap; }
-.auto-skip-toggle { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; padding: 5px 10px; border-radius: 999px; background: white; color: #525c55; font-size: 10px; font-weight: 700; white-space: nowrap; cursor: pointer; }
-.auto-skip-toggle input { width: 14px; height: 14px; margin: 0; accent-color: var(--green); cursor: pointer; }
 .thinking { display: flex; gap: 4px; margin-left: auto; padding: 10px; }
 .thinking i { width: 6px; height: 6px; border-radius: 50%; background: #7e9b87; animation: thinking 1.15s ease-in-out infinite; }
 .thinking i:nth-child(2) { animation-delay: 160ms; }
@@ -640,10 +638,12 @@ summary:focus-visible,
 .player-name-line { display: flex; align-items: center; min-width: 0; gap: 6px; }
 .card-player strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
 .card-player > span { color: var(--muted); font-size: 9px; }
-.card-badges { display: flex; align-items: center; gap: 5px; margin-left: auto; }
+.card-badges { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 5px; margin-left: auto; }
 .card-skip-button { min-height: 32px; padding: 0 10px; border-color: #d4d2ca; background: white; color: #4f5c54; border-radius: 9px; font-size: 10px; }
 .card-skip-button:hover { border-color: var(--green); background: var(--green-soft); color: var(--green-dark); transform: translateX(1px); }
 .card-skip-button .icon { width: 13px; height: 13px; }
+.card-auto-skip { display: inline-flex; align-items: center; gap: 5px; min-height: 32px; padding: 0 9px; border: 1px solid #d4d2ca; border-radius: 9px; background: white; color: #4f5c54; font-size: 10px; font-weight: 700; white-space: nowrap; cursor: pointer; }
+.card-auto-skip input { width: 13px; height: 13px; margin: 0; accent-color: var(--green); cursor: pointer; }
 .badge, .lucky-badge, .variant-badge { padding: 4px 7px; border-radius: 6px; font-size: 8px; font-weight: 750; white-space: nowrap; }
 .badge { background: #fff3d4; color: #946900; }
 .active-player-badge { flex: 0 0 auto; }
@@ -993,7 +993,6 @@ button.variant-chip[aria-pressed="true"], .locate-chip[aria-pressed="true"] { bo
   .action-icon { width: 38px; height: 38px; }
   .action-copy { width: auto; overflow-wrap: anywhere; }
   .choice-count { grid-column: 2; justify-self: start; margin-left: 0; }
-  .auto-skip-toggle { grid-column: 2; justify-self: start; margin-left: 0; }
   .thinking { grid-column: 2; justify-self: start; margin-left: 0; }
   .scoreboard-strip { grid-template-columns: 1fr 1fr; }
   .scoreboard-strip > div { grid-template-columns: 14px 8px minmax(0, 1fr) 30px; }
